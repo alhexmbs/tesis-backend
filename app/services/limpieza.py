@@ -15,10 +15,18 @@ def procesar_excel_ventas(contenido_archivo: bytes, historico_dicts: list = None
 
 
     MAPA_PRODUCTOS = {
+        # NOMBRES HISTÓRICOS (2017 - 2022)
+        "3-GASOHOL 84": "REGULAR",   # La demanda de 84 migró a Regular
+        "4-GASOHOL 90": "REGULAR",   # 90 es la base natural del Regular
+        "5-GASOHOL 95": "PREMIUM",   # 95 es la base natural del Premium
+        
+        # NOMBRES ACTUALES -> 2023 en adelante
+        "12-GASOHOL REGULAR": "REGULAR",
+        "13-GASOHOL PREMIUM": "PREMIUM",
+        
+        # OTROS PRODUCTOS que se mantienen en el tiempo
         "2-BIODIESEL B5 UV": "BIODIESEL",
         "8-GLP": "GLP",
-        "12-GASOHOL REGULAR": "REGULAR",
-        "13-GASOHOL PREMIUM": "PREMIUM"
     }
 
     df_ventas = df_ventas[df_ventas["producto"].isin(MAPA_PRODUCTOS.keys())].copy()
