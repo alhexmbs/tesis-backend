@@ -12,5 +12,6 @@ dependencies = [
     "psycopg2-binary>=2.9.12",
     "psycopg[binary,pool]>=3.3.4",
     "python-multipart>=0.0.32",
+    "requests>=2.34.2",
     "sqlalchemy>=2.0.51",
 ]

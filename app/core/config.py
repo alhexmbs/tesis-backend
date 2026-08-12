@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
 class Settings(BaseSettings):
     db_host: str
     db_port: int
@@ -11,10 +12,7 @@ class Settings(BaseSettings):
 
     debug: bool = False
 
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        extra="ignore"
-    )
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @property
     def database_url(self) -> str:
@@ -24,5 +22,6 @@ class Settings(BaseSettings):
             f"@{self.db_host}:{self.db_port}"
             f"/{self.db_name}"
         )
-    
+
+
 settings = Settings()
