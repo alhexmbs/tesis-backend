@@ -1,6 +1,4 @@
-from datetime import UTC, datetime
-
-from sqlalchemy import Column, Date, DateTime, Integer, Numeric, String
+from sqlalchemy import Column, Date, Integer, Numeric, String
 
 from app.database import Base
 
@@ -16,6 +14,14 @@ class VentaHistorica(Base):
     # Variable objetivo y precios
     cantidad = Column(Numeric(10, 2), nullable=False)
     precio_promedio = Column(Numeric(10, 2), nullable=False)
+
+    # Variables macro (fusionadas desde las tablas de staging en construir_dataset_modelo)
+    precio_wti_usd = Column(Numeric(10, 4), nullable=True)
+    precio_combustible_bcrp = Column(Numeric(12, 6), nullable=True)
+    tipo_cambio_venta = Column(Numeric(10, 4), nullable=True)
+    temperatura_max = Column(Numeric(5, 2), nullable=True)
+    temperatura_min = Column(Numeric(5, 2), nullable=True)
+    precipitacion_mm = Column(Numeric(6, 2), nullable=True)
 
     # Variables booleanas / banderas temporales (0 o 1)
     feriado = Column(Integer, default=0)
@@ -41,22 +47,3 @@ class VentaHistorica(Base):
     ventas_hace_7_dias = Column(Numeric(10, 2), nullable=True)
     promedio_ultimos_3_dias = Column(Numeric(10, 2), nullable=True)
     promedio_ultimos_7_dias = Column(Numeric(10, 2), nullable=True)
-
-
-class Prediccion(Base):
-    __tablename__ = "predicciones"
-
-    id = Column(Integer, primary_key=True, index=True)
-    fecha_objetivo = Column(Date, nullable=False, index=True)
-    producto = Column(String, nullable=False, index=True)
-    cantidad_predicha = Column(Numeric(10, 2), nullable=False)
-    fecha_creacion = Column(DateTime, default=lambda: datetime.now(UTC))
-
-
-class IndiceBcrp(Base):
-    __tablename__ = "indice_bcrp"
-
-    id = Column(Integer, primary_key=True, index=True)
-    producto = Column(String, nullable=False, index=True)
-    fecha = Column(DateTime, default=lambda: datetime.now(UTC))
-    indice_precio = Column(Numeric(10, 2), nullable=False)

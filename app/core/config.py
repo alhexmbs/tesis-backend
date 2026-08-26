@@ -8,6 +8,8 @@ class Settings(BaseSettings):
     db_user: str
     db_password: str
 
+    eia_api_key: str
+
     api_key: str | None = None
 
     debug: bool = False
