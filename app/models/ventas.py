@@ -1,10 +1,11 @@
-from sqlalchemy import Column, Date, Integer, Numeric, String
+from sqlalchemy import Column, Date, Integer, Numeric, String, UniqueConstraint
 
 from app.database import Base
 
 
 class VentaHistorica(Base):
     __tablename__ = "ventas_historicas"
+    __table_args__ = (UniqueConstraint("fecha", "producto", name="uq_ventas_fecha_producto"),)
 
     id = Column(Integer, primary_key=True, index=True)
 
@@ -41,7 +42,6 @@ class VentaHistorica(Base):
     dia_del_year = Column(Integer, nullable=False)
 
     # Variables de rezago (Lags) y tendencias (promedios móviles)
-    # Se permiten nulos (nullable=True) por si los primeros días no tienen historial
     ventas_hace_1_dia = Column(Numeric(10, 2), nullable=True)
     ventas_hace_2_dias = Column(Numeric(10, 2), nullable=True)
     ventas_hace_7_dias = Column(Numeric(10, 2), nullable=True)

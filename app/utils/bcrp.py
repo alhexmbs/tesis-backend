@@ -1,9 +1,4 @@
 import pandas as pd
-import io
-import numpy as np
-import os
-import re
-import holidays
 import requests
 
 # Nota: el BCRP usa abreviaturas de mes distintas según la frecuencia de la serie.
@@ -14,6 +9,38 @@ MESES_ES = {
 }
 
 
+class ErrorBcrp(RuntimeError):
+    """El servicio del BCRP no respondió correctamente (caído, en mantenimiento o bloqueando la petición)."""
+
+
+def _pedir_json_bcrp(url: str, headers: dict) -> dict:
+    """Pide una URL de la API del BCRP y devuelve el JSON, con errores legibles.
+
+    El sitio del BCRP a veces está caído o devuelve una página HTML (mantenimiento,
+    bloqueo anti-bot tipo Incapsula) con status 200, lo que hace que .json() reviente
+    con un "Expecting value: line 1 column 1 (char 0)" que no dice nada al usuario.
+    """
+    try:
+        respuesta = requests.get(url, headers=headers, timeout=30)
+    except requests.exceptions.RequestException as e:
+        raise ErrorBcrp(f"No se pudo conectar con el BCRP ({url}): {e}") from e
+
+    try:
+        respuesta.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        raise ErrorBcrp(f"El BCRP respondió con error HTTP para {url}: {e}") from e
+
+    try:
+        return respuesta.json()
+    except ValueError as e:
+        raise ErrorBcrp(
+            f"El BCRP no devolvió datos válidos para {url} "
+            f"(status {respuesta.status_code}, Content-Type: {respuesta.headers.get('Content-Type')}). "
+            "El sitio puede estar caído, en mantenimiento o bloqueando la petición. "
+            "Verifica manualmente en https://estadisticas.bcrp.gob.pe."
+        ) from e
+
+
 def obtener_serie_mensual_bcrp(codigo: str, fecha_inicio: str, fecha_fin: str,
                                 value_name: str = "valor") -> pd.DataFrame:
     """Descarga una serie mensual del BCRP y la devuelve como DataFrame(fecha, value_name)."""
@@ -22,9 +49,7 @@ def obtener_serie_mensual_bcrp(codigo: str, fecha_inicio: str, fecha_fin: str,
         f"{codigo}/json/{fecha_inicio}/{fecha_fin}/esp"
     )
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-    respuesta = requests.get(url, headers=headers, timeout=30)
-    respuesta.raise_for_status()
-    data = respuesta.json()
+    data = _pedir_json_bcrp(url, headers)
 
     periodos = data.get("periods", [])
     if not periodos:
@@ -49,6 +74,17 @@ def _empalmar_tramos(tramos, fecha_inicio_usuario: str, fecha_fin_usuario: str) 
     factor = valor_del_tramo_siguiente / valor_de_este_tramo, y reescala TODO el tramo
     actual por ese factor antes de pegarlo.
     """
+    # Descartar tramos que no se solapan con el rango solicitado: si el rango del
+    # usuario cae íntegramente después (o antes) del tramo, pedirlo igual generaría
+    # un rango inválido (ini > fin) y la API devolvería una serie vacía.
+    inicio_usuario = _a_timestamp(fecha_inicio_usuario)
+    fin_usuario = _a_timestamp(fecha_fin_usuario)
+    tramos = [
+        (codigo, ini, fin) for codigo, ini, fin in tramos
+        if (fin is None or _a_timestamp(fin) >= inicio_usuario)
+        and (ini is None or _a_timestamp(ini) <= fin_usuario)
+    ]
+
     if len(tramos) == 1:
         codigo, ini, fin = tramos[0]
         return obtener_serie_mensual_bcrp(codigo, ini or fecha_inicio_usuario, fin or fecha_fin_usuario)

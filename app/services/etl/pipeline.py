@@ -17,8 +17,7 @@ def construir_dataset_modelo(df_ventas, df_wti, df_precios_combustible, df_tipo_
     df = df.merge(precios[["anio_mes", "producto", "precio_combustible_bcrp"]],
                   on=["anio_mes", "producto"], how="left")
 
-    tipo_cambio = df_tipo_cambio.copy()
-    tipo_cambio["anio_mes"] = tipo_cambio["fecha"].values.astype("datetime64[M]")
-    df = df.merge(tipo_cambio[["anio_mes", "tipo_cambio_venta"]], on="anio_mes", how="left")
+    df = df.merge(df_tipo_cambio[["fecha", "tipo_cambio_venta"]], on="fecha", how="left")
+    df["tipo_cambio_venta"] = df["tipo_cambio_venta"].ffill()
 
     return df.drop(columns=["anio_mes"])

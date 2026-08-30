@@ -1,3 +1,8 @@
+import gradio as gr
+
+from app.ui.auth import autenticar
+from app.ui.cargar_ventas import demo as cargar_ventas_demo
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -13,6 +18,7 @@ from app.models import (
 )
 from app.routers import auth as auth_router
 from app.routers import etl as etl_router
+
 
 Base.metadata.create_all(bind=engine)
 
@@ -31,6 +37,7 @@ app.add_middleware(
 app.include_router(auth_router.router)
 app.include_router(etl_router.router)
 
+app = gr.mount_gradio_app(app, cargar_ventas_demo, path="/ui", auth=autenticar)
 
 @app.get("/")
 def health_check():

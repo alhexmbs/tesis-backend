@@ -2,7 +2,7 @@ import pandas as pd
 import io
 import re
 import requests
-from app.utils.bcrp import _a_timestamp, _empalmar_tramos
+from app.utils.bcrp import _a_timestamp, _empalmar_tramos, _pedir_json_bcrp
 
 # Nota: para series diarias el BCRP devuelve "Set" para setiembre (distinto de "Sep" en mensuales).
 MESES_ES = {
@@ -49,73 +49,38 @@ def extraer_excel(contenido_archivo: bytes) -> pd.DataFrame:
 
 
 def extraer_txt(contenido_archivo: bytes) -> pd.DataFrame:
-    """Extrae las transacciones desde un archivo TXT (formato de impresora o Pipe-separated)."""
+    """Extrae las transacciones desde un archivo TXT en formato separado por pipes (|)."""
     contenido = contenido_archivo.decode('latin-1')
-    
-    # 1. Detectar si es el nuevo formato separado por pipes (|) (Año 2024 en adelante)
-    if '|' in contenido.splitlines()[0]:
-        df = pd.read_csv(io.StringIO(contenido), sep='|', header=None, engine='python')
-        # Formato del contador: 0=Fecha, 11=ProductoCode, 13=Cantidad, 14=Precio, 15=Venta, 16=Importe
-        columnas = [0, 11, 13, 14, 15, 16]
-        df = df[columnas].copy()
-        df.columns = ["fecha", "producto", "cantidad", "precio", "venta", "importe"]
-        
-        # Limpiar fecha (viene como '28/09/2024 00:00:00')
-        df["fecha"] = df["fecha"].astype(str).str.split(" ").str[0]
-        df["fecha"] = pd.to_datetime(df["fecha"], format="%d/%m/%Y")
-        
-        # Limpiar producto y forzar valores positivos
-        df["producto"] = df["producto"].astype(str).str.replace(r'\.0', '', regex=True)
-        for c in ["cantidad", "precio", "venta", "importe"]:
-            df[c] = pd.to_numeric(df[c], errors="coerce").abs()
-            
-        return df
 
-    # 2. Formato legacy Spool (Año 2023)
-    lineas = contenido.splitlines()
-    
-    # Extraer el año del encabezado (línea 3 típicamente tiene "DEL 01/01/2023 AL ...")
-    year_match = re.search(r'DEL \d{2}/\d{2}/(\d{4})', contenido)
-    year = year_match.group(1) if year_match else "2023" # Fallback
-    
-    registros = []
-    producto_actual = None
-    
-    for linea in lineas:
-        linea_limpia = linea.strip()
-        if "ARTICULO:" in linea_limpia:
-            producto_actual = linea.split("ARTICULO:")[1].strip()
-            continue
-            
-        # Si la línea empieza con un patrón de fecha ej. "27/05/2" (formato truncado)
-        if re.match(r'^\d{2}/\d{2}/\d', linea_limpia):
-            fecha_raw = linea_limpia[:7]
-            # Formar la fecha completa usando el año del header (ej: '27/05/' + '2023')
-            fecha_str = f"{fecha_raw[:6]}{year}"
-            
-            # Buscar los últimos números de la línea que tengan 2 decimales
-            nums = re.findall(r'-?[\d,]+\.\d{2}', linea)
-            
-            if len(nums) >= 4:
-                # El formato es: [..., cantidad, precio, venta, importe, TC (opcional)]
-                # Por tanto, importe suele ser el penúltimo si hay TC, o el último si no hay.
-                cantidad = nums[-5] if len(nums) >= 5 else nums[-4]
-                precio = nums[-4] if len(nums) >= 5 else nums[-3]
-                venta = nums[-3] if len(nums) >= 5 else nums[-2]
-                importe = nums[-2] if len(nums) >= 5 else nums[-1]
-                
-                registros.append({
-                    "fecha": fecha_str,
-                    "cantidad": cantidad,
-                    "precio": precio,
-                    "venta": venta,
-                    "importe": importe,
-                    "producto": producto_actual
-                })
-                
-    df_ventas = pd.DataFrame(registros)
-    df_ventas["fecha"] = pd.to_datetime(df_ventas["fecha"], format="%d/%m/%Y")
-    return df_ventas
+    if '|' not in contenido.splitlines()[0]:
+        raise ValueError(
+            "El archivo no viene en formato pipe (|) esperado. "
+            "Revisa si este año/archivo usa una estructura distinta antes de continuar."
+        )
+
+    df = pd.read_csv(io.StringIO(contenido), sep='|', header=None, engine='python')
+    # Formato del contador: 0=Fecha, 1=TipoComprobante, 2=Serie, 3=Numero,
+    # 11=ProductoCode, 13=Cantidad, 14=Precio, 15=Venta, 16=Importe
+    columnas = [0, 1, 2, 3, 11, 13, 14, 15, 16]
+    df = df[columnas].copy()
+    df.columns = ["fecha", "tipo_comprobante", "serie", "numero", "producto", "cantidad", "precio", "venta", "importe"]
+
+    # Codigo de boleta/comprobante en formato estandar peruano: Serie-Numero (ej. "F003-49555")
+    df["codigo_boleta"] = df["serie"].astype(str) + "-" + df["numero"].astype(str)
+    df = df.drop(columns=["serie", "numero"])
+
+    df["fecha"] = df["fecha"].astype(str).str.split(" ").str[0]
+    df["fecha"] = pd.to_datetime(df["fecha"], format="%d/%m/%Y")
+
+    df["producto"] = df["producto"].astype(str).str.replace(r'\.0', '', regex=True)
+
+    # Cantidad: se preserva el signo (tipo_comprobante == "NOT" puede traer cantidad
+    # negativa -- son correcciones/reversiones, no ventas nuevas).
+    df["cantidad"] = pd.to_numeric(df["cantidad"], errors="coerce")
+    for c in ["precio", "venta", "importe"]:
+        df[c] = pd.to_numeric(df[c], errors="coerce").abs()
+
+    return df
 
 
 def obtener_data_eia(fecha_inicio: str, fecha_fin: str, api_key: str,
@@ -172,9 +137,7 @@ def obtener_data_bcrp_cambio_dolar(codigo: str, fecha_inicio: str, fecha_fin: st
         f"{codigo}/json/{fecha_inicio}/{fecha_fin}/esp"
     )
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
-    respuesta = requests.get(url, headers=headers, timeout=30)
-    respuesta.raise_for_status()
-    data = respuesta.json()
+    data = _pedir_json_bcrp(url, headers)
 
     filas = []
     for periodo in data.get("periods", []):

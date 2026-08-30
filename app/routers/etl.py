@@ -24,6 +24,7 @@ from app.services.etl.extraction import (
 )
 from app.services.etl.pipeline import construir_dataset_modelo
 from app.services.etl.transformation import feature_engineering, limpiar_datos
+from app.utils.bcrp import ErrorBcrp
 
 router = APIRouter(prefix="/api/etl", tags=["ETL"])
 
@@ -107,6 +108,55 @@ async def ejecutar_etl(
             "filas_procesadas": len(df_final),
             "fecha_inicio": fecha_inicio,
             "fecha_fin": fecha_fin,
+        }
+
+    except ErrorBcrp as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/solo-ventas")
+async def ejecutar_etl_solo_ventas(
+    archivo: Annotated[UploadFile, File()],
+    db: Annotated[Session, Depends(get_db)],
+):
+    """Guarda solo las ventas propias del archivo subido en ventas_historicas (cantidad,
+    precio, calendario, lags), sin llamar a las 4 fuentes externas (WTI, BCRP tipo de
+    cambio, BCRP índices, clima). Las columnas macro quedan en NULL para esas filas.
+    Útil para analizar ventas cuando alguna fuente externa está caída (ver ErrorBcrp);
+    las columnas macro se pueden completar más adelante corriendo /ejecutar."""
+    try:
+        contenido = await archivo.read()
+        if archivo.filename and archivo.filename.lower().endswith((".xlsx", ".xls")):
+            df_ventas_crudo = extraer_excel(contenido)
+        else:
+            df_ventas_crudo = extraer_txt(contenido)
+
+        df_diario = limpiar_datos(df_ventas_crudo)
+
+        fecha_min = df_diario["fecha"].min()
+        fecha_max = df_diario["fecha"].max()
+
+        productos = df_diario["producto"].unique().tolist()
+        historico_dicts = obtener_historico_para_lags(db, fecha_min.date(), productos)
+
+        df_features = feature_engineering(df_diario, historico_dicts)
+
+        # feature_engineering antepone historial previo (para poder calcular los lags de
+        # los primeros días del lote); se recorta de vuelta al rango del archivo subido.
+        df_features = df_features[(df_features["fecha"] >= fecha_min) & (df_features["fecha"] <= fecha_max)]
+
+        for columna in ("precio_wti_usd", "precio_combustible_bcrp", "tipo_cambio_venta",
+                         "temperatura_max", "temperatura_min", "precipitacion_mm"):
+            df_features[columna] = None
+
+        guardar_ventas_historicas(db, df_features)
+
+        return {
+            "filas_procesadas": len(df_features),
+            "fecha_inicio": fecha_min.strftime("%Y-%m-%d"),
+            "fecha_fin": fecha_max.strftime("%Y-%m-%d"),
         }
 
     except Exception as e:

@@ -7,12 +7,17 @@ MAPA_PRODUCTOS = {
     "8-GLP": "GLP",
     "12-GASOHOL REGULAR": "REGULAR",
     "13-GASOHOL PREMIUM": "PREMIUM",
+    "3-GASOHOL 84": "REGULAR",
+    "4-GASOHOL 90": "REGULAR",
+    "5-GASOHOL 95": "PREMIUM",
     # Mapeos para el formato separado por pipes (2024 en adelante) donde solo viene el ID
-    # revisar esto en el mismo archivo
     "2": "BIODIESEL",
     "8": "GLP",
     "12": "REGULAR",
-    "13": "PREMIUM"
+    "13": "PREMIUM",
+    "3": "REGULAR",   # Gasohol 84 -> Regular (mismo criterio que con Royal Prix)
+    "4": "REGULAR",   # Gasohol 90 -> Regular
+    "5": "PREMIUM",   # Gasohol 95 -> Premium
 }
 
 
