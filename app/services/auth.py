@@ -12,6 +12,30 @@ from app.utils.password import (
 def register_service(
     nombres, apellidos, dni, nro_celular, username, password, db: Session
 ):
+
+    # verificar si no existe un usuario con el mismo username
+    stmt_username = select(Usuario).where(Usuario.username == username)
+    user_db_by_username = db.scalar(stmt_username)
+    username_duplicated_code = 1
+    if user_db_by_username:
+        return username_duplicated_code
+
+
+    # verificar si no existe un usuario con el mismo dni
+    stmt_dni = select(Usuario).where(Usuario.dni == dni)
+    user_db_by_dni = db.scalar(stmt_dni)
+    dni_duplicated_code = 2
+    if user_db_by_dni:
+        return dni_duplicated_code
+
+    # verificar si no existe un usuario con el mismo nro_celular
+    stmt_nro_celular = select(Usuario).where(Usuario.nro_celular == nro_celular)
+    user_db_by_nro_celular = db.scalar(stmt_nro_celular)
+    nro_celular_duplicated_code = 3
+    if user_db_by_nro_celular:
+        return nro_celular_duplicated_code
+    
+
     # Agrupar datos personales para evitar que se usen en la contraseña
     # Convertimos todo a string por seguridad para zxcvbn
     user_data = [

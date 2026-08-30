@@ -15,7 +15,9 @@ from app.models import (
 from app.routers import auth as auth_router
 from app.routers import etl as etl_router
 from app.ui.auth import autenticar
-from app.ui.cargar_ventas import demo as cargar_ventas_demo
+from app.ui.inicio import demo as inicio_demo
+from app.ui.login import demo as login_demo
+from app.ui.registro import demo as registro_demo
 
 Base.metadata.create_all(bind=engine)
 
@@ -34,7 +36,26 @@ app.add_middleware(
 app.include_router(auth_router.router)
 app.include_router(etl_router.router)
 
-app = gr.mount_gradio_app(app, cargar_ventas_demo, path="/ui", auth=autenticar)
+# Fuerza modo claro al cargar, sin importar el tema del sistema/navegador
+FORCE_LIGHT_JS = """
+function() {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get('__theme') !== 'light') {
+        url.searchParams.set('__theme', 'light');
+        window.location.replace(url.href);
+    }
+}
+"""
+
+# "/registro" y "/login" quedan fuera de auth: son las páginas públicas de entrada
+app = gr.mount_gradio_app(app, registro_demo, path="/registro", js=FORCE_LIGHT_JS)
+app = gr.mount_gradio_app(app, login_demo, path="/login", js=FORCE_LIGHT_JS)
+
+# "/inicio" y sus sub-páginas (subir_archivo, ver_predicciones, graficos) comparten
+# la misma sesión de login porque viven en un único Blocks montado con demo.route().
+app = gr.mount_gradio_app(
+    app, inicio_demo, path="/inicio", auth=autenticar, js=FORCE_LIGHT_JS
+)
 
 
 @app.get("/")
