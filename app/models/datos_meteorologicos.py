@@ -2,8 +2,10 @@ from sqlalchemy import Column, Date, Integer, Numeric
 
 from app.database import Base
 
+
 class DatoMeteorologico(Base):
     """Clima diario (Open-Meteo). No depende del producto."""
+
     __tablename__ = "datos_meteorologicos"
 
     id = Column(Integer, primary_key=True, index=True)

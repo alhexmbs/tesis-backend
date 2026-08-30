@@ -5,6 +5,7 @@ from app.database import Base
 
 class TipoCambioBcrp(Base):
     """Tipo de cambio interbancario venta del BCRP (serie diaria PD04638PD). No depende del producto."""
+
     __tablename__ = "tipo_cambio_bcrp"
 
     id = Column(Integer, primary_key=True, index=True)

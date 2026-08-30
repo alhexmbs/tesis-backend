@@ -1,5 +1,6 @@
 import gradio as gr
 
+
 def saludar(nombre):
     return f"Hola, {nombre}"
 
@@ -7,5 +8,5 @@ def saludar(nombre):
 demo = gr.Interface(
     fn=saludar,
     inputs=gr.Textbox(label="Tu nombre"),
-    outputs=gr.Textbox(label="Respuesta")
+    outputs=gr.Textbox(label="Respuesta"),
 )

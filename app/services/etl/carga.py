@@ -44,7 +44,9 @@ def guardar_tipo_cambio(db: Session, df: pd.DataFrame) -> None:
     for _, fila in df.iterrows():
         fecha = pd.Timestamp(fila["fecha"]).date()
 
-        registro = db.query(TipoCambioBcrp).filter(TipoCambioBcrp.fecha == fecha).first()
+        registro = (
+            db.query(TipoCambioBcrp).filter(TipoCambioBcrp.fecha == fecha).first()
+        )
         if registro is None:
             registro = TipoCambioBcrp(fecha=fecha)
             db.add(registro)
@@ -59,7 +61,9 @@ def guardar_datos_meteorologicos(db: Session, df: pd.DataFrame) -> None:
     for _, fila in df.iterrows():
         fecha = pd.Timestamp(fila["fecha"]).date()
 
-        registro = db.query(DatoMeteorologico).filter(DatoMeteorologico.fecha == fecha).first()
+        registro = (
+            db.query(DatoMeteorologico).filter(DatoMeteorologico.fecha == fecha).first()
+        )
         if registro is None:
             registro = DatoMeteorologico(fecha=fecha)
             db.add(registro)
@@ -79,7 +83,10 @@ def guardar_indice_precio_combustibles(db: Session, df: pd.DataFrame) -> None:
 
         registro = (
             db.query(PrecioCombustibleBcrp)
-            .filter(PrecioCombustibleBcrp.fecha == fecha, PrecioCombustibleBcrp.producto == producto)
+            .filter(
+                PrecioCombustibleBcrp.fecha == fecha,
+                PrecioCombustibleBcrp.producto == producto,
+            )
             .first()
         )
         if registro is None:
@@ -115,7 +122,9 @@ def guardar_ventas_historicas(db: Session, df: pd.DataFrame) -> None:
         registro.es_vispera_navidad = _a_entero(fila["es_vispera_navidad"])
         registro.es_vispera_year_nuevo = _a_entero(fila["es_vispera_year_nuevo"])
         registro.es_vispera_semana_santa = _a_entero(fila["es_vispera_semana_santa"])
-        registro.es_vispera_feriado_general = _a_entero(fila["es_vispera_feriado_general"])
+        registro.es_vispera_feriado_general = _a_entero(
+            fila["es_vispera_feriado_general"]
+        )
 
         registro.year = _a_entero(fila["year"])
         registro.mes = _a_entero(fila["mes"])
@@ -141,7 +150,9 @@ def guardar_ventas_historicas(db: Session, df: pd.DataFrame) -> None:
     db.commit()
 
 
-def obtener_historico_para_lags(db: Session, fecha_inicio: date, productos: list[str]) -> list[dict]:
+def obtener_historico_para_lags(
+    db: Session, fecha_inicio: date, productos: list[str]
+) -> list[dict]:
     """
     Trae los últimos días de ventas ya guardados antes de fecha_inicio, por producto,
     para que feature_engineering pueda calcular lags/promedios del nuevo lote sin

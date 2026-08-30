@@ -1,6 +1,9 @@
-from app.database import Base
-from sqlalchemy import Column, DateTime, Integer, Boolean, String
 from datetime import UTC, datetime
+
+from sqlalchemy import Boolean, Column, DateTime, Integer, String
+
+from app.database import Base
+
 
 class Usuario(Base):
     __tablename__ = "usuarios"
@@ -9,9 +12,10 @@ class Usuario(Base):
 
     nombres = Column(String, nullable=False, index=False)
     apellidos = Column(String, nullable=False, index=False)
+    dni = Column(String, nullable=False, index=False)
+    nro_celular = Column(String, nullable=False, index=True)
     username = Column(String, nullable=False, index=True)
-    email = Column(String, nullable=False, index=True)
-    hashed_password = Column(String, nullable=False, index=False)
+    password = Column(String, nullable=False, index=False)
 
     fecha_creacion = Column(DateTime, default=lambda: datetime.now(UTC))
     estado = Column(Boolean, default=True, nullable=False, index=True)

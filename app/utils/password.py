@@ -3,27 +3,36 @@ from zxcvbn import zxcvbn
 
 password_hash = PasswordHash.recommended()
 
-def validate_password_strength(password):
-    if len(password) > 8:
-        raise ValueError("La contraseña debe tener al menos 8 caracteres.")
 
-    results = zxcvbn(password, user_inputs=password)
-    score = results.get("score", 0) # Returns an integer 0 (weak) to 4 (strong)
+def validate_password_strength(password, user_data=None):
+    if len(password) < 8 or len(password) > 50:
+        raise ValueError("La contraseña debe tener entre 8 y 50 caracteres.")
 
-    # Enforce a minimum acceptable score (e.g., 3 out of 4)
+    # user_data debería ser una lista opcional, ej: ['juan_perez', 'juan@email.com']
+    inputs = user_data if user_data else []
+    results = zxcvbn(password, user_inputs=inputs)
+
+    score = results.get("score", 0)  # 0 (débil) a 4 (fuerte)
+
     if score < 3:
-        # Extract localized feedback hints if available from the library
         feedback = results.get("feedback", {})
-        warning = feedback.get("warning", "Password is too easy to guess.")
+        warning = feedback.get("warning", "")
         suggestions = " ".join(feedback.get("suggestions", []))
-        
-        raise ValueError(f"{warning} {suggestions}".strip())
+
+        # Fallback en caso de que warning/suggestions vengan vacíos
+        error_msg = f"{warning} {suggestions}".strip()
+        if not error_msg:
+            error_msg = "La contraseña es demasiado fácil de adivinar."
+
+        raise ValueError(error_msg)
 
     return score
+
 
 def hash_password(password):
     hash = password_hash.hash(password)
     return hash
+
 
 def verify_password(user_password, hashed_password):
     verification = password_hash.verify(user_password, hashed_password)

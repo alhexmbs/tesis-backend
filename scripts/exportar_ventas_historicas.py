@@ -15,7 +15,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.database import engine
 
-RUTA_SALIDA_DEFAULT = Path(__file__).resolve().parent.parent / "data" / "ventas_historicas.csv"
+RUTA_SALIDA_DEFAULT = (
+    Path(__file__).resolve().parent.parent / "data" / "ventas_historicas.csv"
+)
 
 
 def main() -> None:

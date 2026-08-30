@@ -71,7 +71,9 @@ async def ejecutar_etl(
 
         # Traer las 4 fuentes externas
         df_wti = obtener_data_eia(fecha_inicio_wti, fecha_fin, settings.eia_api_key)
-        df_tipo_cambio = obtener_data_bcrp_cambio_dolar(CODIGO_BCRP_TIPO_CAMBIO, fecha_inicio, fecha_fin)
+        df_tipo_cambio = obtener_data_bcrp_cambio_dolar(
+            CODIGO_BCRP_TIPO_CAMBIO, fecha_inicio, fecha_fin
+        )
         df_clima = obtener_data_meteorologica(fecha_inicio, fecha_fin)
         df_indices = obtener_data_bcrp_indices(fecha_inicio_mensual, fecha_fin_mensual)
 
@@ -91,16 +93,22 @@ async def ejecutar_etl(
 
         # construir_dataset_modelo espera la columna "tipo_cambio_venta", mientras que
         # la extracción cruda del BCRP devuelve "valor" (la misma que se guardó arriba).
-        df_tipo_cambio_modelo = df_tipo_cambio.rename(columns={"valor": "tipo_cambio_venta"})
+        df_tipo_cambio_modelo = df_tipo_cambio.rename(
+            columns={"valor": "tipo_cambio_venta"}
+        )
 
         # Unir ventas + las 4 fuentes externas en el dataset final para el modelo
-        df_final = construir_dataset_modelo(df_features, df_wti, df_indices, df_tipo_cambio_modelo, df_clima)
+        df_final = construir_dataset_modelo(
+            df_features, df_wti, df_indices, df_tipo_cambio_modelo, df_clima
+        )
 
         # Recortar de vuelta al rango exacto de las ventas del archivo subido: descarta
         # tanto el margen de 5 días usado para el WTI como los días de historial
         # (fin del mes anterior) que feature_engineering concatenó solo para poder
         # calcular los lags/promedios de los primeros días del lote nuevo.
-        df_final = df_final[(df_final["fecha"] >= fecha_min) & (df_final["fecha"] <= fecha_max)]
+        df_final = df_final[
+            (df_final["fecha"] >= fecha_min) & (df_final["fecha"] <= fecha_max)
+        ]
 
         guardar_ventas_historicas(db, df_final)
 
@@ -145,10 +153,18 @@ async def ejecutar_etl_solo_ventas(
 
         # feature_engineering antepone historial previo (para poder calcular los lags de
         # los primeros días del lote); se recorta de vuelta al rango del archivo subido.
-        df_features = df_features[(df_features["fecha"] >= fecha_min) & (df_features["fecha"] <= fecha_max)]
+        df_features = df_features[
+            (df_features["fecha"] >= fecha_min) & (df_features["fecha"] <= fecha_max)
+        ]
 
-        for columna in ("precio_wti_usd", "precio_combustible_bcrp", "tipo_cambio_venta",
-                         "temperatura_max", "temperatura_min", "precipitacion_mm"):
+        for columna in (
+            "precio_wti_usd",
+            "precio_combustible_bcrp",
+            "tipo_cambio_venta",
+            "temperatura_max",
+            "temperatura_min",
+            "precipitacion_mm",
+        ):
             df_features[columna] = None
 
         guardar_ventas_historicas(db, df_features)

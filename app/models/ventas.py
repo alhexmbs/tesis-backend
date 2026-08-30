@@ -5,7 +5,9 @@ from app.database import Base
 
 class VentaHistorica(Base):
     __tablename__ = "ventas_historicas"
-    __table_args__ = (UniqueConstraint("fecha", "producto", name="uq_ventas_fecha_producto"),)
+    __table_args__ = (
+        UniqueConstraint("fecha", "producto", name="uq_ventas_fecha_producto"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
 

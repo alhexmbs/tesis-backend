@@ -11,6 +11,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 # base para los modelos -> Las tablas heredarán de aquí
 Base = declarative_base()
 
+
 # dependencia para FastAPI - abre la conexión al recibir petición y la cierra al terminar
 def get_db():
     db = SessionLocal()

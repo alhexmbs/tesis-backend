@@ -4,8 +4,18 @@ import requests
 # Nota: el BCRP usa abreviaturas de mes distintas según la frecuencia de la serie.
 # Las series diarias devuelven "Set" para setiembre; las mensuales devuelven "Sep".
 MESES_ES = {
-    "Ene": 1, "Feb": 2, "Mar": 3, "Abr": 4, "May": 5, "Jun": 6,
-    "Jul": 7, "Ago": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dic": 12,
+    "Ene": 1,
+    "Feb": 2,
+    "Mar": 3,
+    "Abr": 4,
+    "May": 5,
+    "Jun": 6,
+    "Jul": 7,
+    "Ago": 8,
+    "Sep": 9,
+    "Oct": 10,
+    "Nov": 11,
+    "Dic": 12,
 }
 
 
@@ -41,19 +51,24 @@ def _pedir_json_bcrp(url: str, headers: dict) -> dict:
         ) from e
 
 
-def obtener_serie_mensual_bcrp(codigo: str, fecha_inicio: str, fecha_fin: str,
-                                value_name: str = "valor") -> pd.DataFrame:
+def obtener_serie_mensual_bcrp(
+    codigo: str, fecha_inicio: str, fecha_fin: str, value_name: str = "valor"
+) -> pd.DataFrame:
     """Descarga una serie mensual del BCRP y la devuelve como DataFrame(fecha, value_name)."""
     url = (
         f"https://estadisticas.bcrp.gob.pe/estadisticas/series/api/"
         f"{codigo}/json/{fecha_inicio}/{fecha_fin}/esp"
     )
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
     data = _pedir_json_bcrp(url, headers)
 
     periodos = data.get("periods", [])
     if not periodos:
-        print(f"El BCRP respondió sin datos para el código '{codigo}' en el rango {fecha_inicio} a {fecha_fin}.")
+        print(
+            f"El BCRP respondió sin datos para el código '{codigo}' en el rango {fecha_inicio} a {fecha_fin}."
+        )
         return pd.DataFrame(columns=["fecha", value_name])
 
     filas = []
@@ -67,7 +82,9 @@ def obtener_serie_mensual_bcrp(codigo: str, fecha_inicio: str, fecha_fin: str,
     return pd.DataFrame(filas).sort_values("fecha").reset_index(drop=True)
 
 
-def _empalmar_tramos(tramos, fecha_inicio_usuario: str, fecha_fin_usuario: str) -> pd.DataFrame:
+def _empalmar_tramos(
+    tramos, fecha_inicio_usuario: str, fecha_fin_usuario: str
+) -> pd.DataFrame:
     """
     Descarga cada tramo y los empalma (chain-linking) en una sola serie continua.
     Recorre de más reciente a más antiguo: en cada mes de frontera compartido calcula
@@ -80,17 +97,22 @@ def _empalmar_tramos(tramos, fecha_inicio_usuario: str, fecha_fin_usuario: str) 
     inicio_usuario = _a_timestamp(fecha_inicio_usuario)
     fin_usuario = _a_timestamp(fecha_fin_usuario)
     tramos = [
-        (codigo, ini, fin) for codigo, ini, fin in tramos
+        (codigo, ini, fin)
+        for codigo, ini, fin in tramos
         if (fin is None or _a_timestamp(fin) >= inicio_usuario)
         and (ini is None or _a_timestamp(ini) <= fin_usuario)
     ]
 
     if len(tramos) == 1:
         codigo, ini, fin = tramos[0]
-        return obtener_serie_mensual_bcrp(codigo, ini or fecha_inicio_usuario, fin or fecha_fin_usuario)
+        return obtener_serie_mensual_bcrp(
+            codigo, ini or fecha_inicio_usuario, fin or fecha_fin_usuario
+        )
 
     segmentos = [
-        obtener_serie_mensual_bcrp(codigo, ini or fecha_inicio_usuario, fin or fecha_fin_usuario)
+        obtener_serie_mensual_bcrp(
+            codigo, ini or fecha_inicio_usuario, fin or fecha_fin_usuario
+        )
         for codigo, ini, fin in tramos
     ]
 
@@ -100,14 +122,20 @@ def _empalmar_tramos(tramos, fecha_inicio_usuario: str, fecha_fin_usuario: str) 
         mes_corte = seg_actual["fecha"].max()
 
         valor_actual = seg_actual.loc[seg_actual["fecha"] == mes_corte, "valor"].iloc[0]
-        valor_referencia = piezas[0].loc[piezas[0]["fecha"] == mes_corte, "valor"].iloc[0]
+        valor_referencia = (
+            piezas[0].loc[piezas[0]["fecha"] == mes_corte, "valor"].iloc[0]
+        )
         factor = valor_referencia / valor_actual
 
         seg_actual["valor"] = seg_actual["valor"] * factor
-        seg_actual = seg_actual[seg_actual["fecha"] < mes_corte]  # el mes de corte ya viene del tramo siguiente
+        seg_actual = seg_actual[
+            seg_actual["fecha"] < mes_corte
+        ]  # el mes de corte ya viene del tramo siguiente
         piezas.insert(0, seg_actual)
 
-    return pd.concat(piezas, ignore_index=True).sort_values("fecha").reset_index(drop=True)
+    return (
+        pd.concat(piezas, ignore_index=True).sort_values("fecha").reset_index(drop=True)
+    )
 
 
 def _a_timestamp(periodo_str: str) -> pd.Timestamp:
