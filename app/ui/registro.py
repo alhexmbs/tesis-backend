@@ -3,12 +3,19 @@ import gradio as gr
 from app.database import SessionLocal
 from app.services.auth import register_service
 
-
 SIN_ERROR = gr.update(value="", visible=False)
 
 
+def _banner(tipo: str, icono: str, mensaje: str) -> str:
+    return (
+        f'<div class="msg msg-{tipo}">'
+        f'<div class="msg-titulo">{icono} {mensaje}</div>'
+        "</div>"
+    )
+
+
 def error_en(mensaje):
-    return gr.update(value=f"❌ {mensaje}", visible=True)
+    return gr.update(value=_banner("err", "⚠️", mensaje), visible=True)
 
 
 def registrar(nombres, apellidos, dni, nro_celular, username, password):
@@ -52,7 +59,9 @@ def registrar(nombres, apellidos, dni, nro_celular, username, password):
         SIN_ERROR,
         SIN_ERROR,
         SIN_ERROR,
-        "Usuario registrado correctamente. Ya puedes iniciar sesión.",
+        _banner(
+            "ok", "✅", "Usuario registrado correctamente. Ya puedes iniciar sesión."
+        ),
     )
 
 
@@ -61,25 +70,25 @@ with gr.Blocks(title="Registro de usuario") as demo:
     gr.Markdown("¿Ya tienes una cuenta? [Inicia sesión aquí](/login)")
 
     nombres = gr.Textbox(label="Nombres")
-    nombre_error = gr.Markdown(visible=False)
+    nombre_error = gr.HTML(visible=False)
 
     apellidos = gr.Textbox(label="Apellidos")
-    apellido_error = gr.Markdown(visible=False)
+    apellido_error = gr.HTML(visible=False)
 
     dni = gr.Textbox(label="DNI")
-    dni_error = gr.Markdown(visible=False)
+    dni_error = gr.HTML(visible=False)
 
     nro_celular = gr.Textbox(label="Número de celular")
-    nro_celular_error = gr.Markdown(visible=False)
+    nro_celular_error = gr.HTML(visible=False)
 
     username = gr.Textbox(label="Usuario")
-    username_error = gr.Markdown(visible=False)
+    username_error = gr.HTML(visible=False)
 
     password = gr.Textbox(label="Contraseña", type="password")
-    password_error = gr.Markdown(visible=False)
+    password_error = gr.HTML(visible=False)
 
     boton = gr.Button("Registrar", variant="primary")
-    resultado = gr.Markdown()
+    resultado = gr.HTML()
 
     boton.click(
         fn=registrar,

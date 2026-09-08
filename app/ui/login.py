@@ -1,9 +1,12 @@
 import gradio as gr
 
+
 LOGIN_JS = """
 async (username, password) => {
+    const error = (t) =>
+        '<div class="msg msg-err"><div class="msg-titulo">⚠️ ' + t + '</div></div>';
     if (!username || !password) {
-        return "❌ Ingresa usuario y contraseña.";
+        return error('Ingresa usuario y contraseña.');
     }
     try {
         const body = new URLSearchParams({ username, password });
@@ -16,9 +19,9 @@ async (username, password) => {
             window.location.href = '/inicio';
             return '';
         }
-        return '❌ Usuario o contraseña incorrectos.';
+        return error('Usuario o contraseña incorrectos.');
     } catch (e) {
-        return '❌ No se pudo conectar con el servidor.';
+        return error('No se pudo conectar con el servidor.');
     }
 }
 """
@@ -28,7 +31,7 @@ with gr.Blocks(title="Iniciar sesión") as demo:
 
     username = gr.Textbox(label="Usuario")
     password = gr.Textbox(label="Contraseña", type="password")
-    login_error = gr.Markdown()
+    login_error = gr.HTML()
 
     boton = gr.Button("Iniciar sesión", variant="primary")
 

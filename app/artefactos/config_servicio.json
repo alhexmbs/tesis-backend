@@ -1,0 +1,115 @@
+{
+  "modelo": "ridge",
+  "target_modelado": "cantidad / base_28",
+  "productos": [
+    "REGULAR",
+    "PREMIUM",
+    "GLP"
+  ],
+  "features": [
+    "mes",
+    "dia_semana",
+    "feriado",
+    "es_vispera_navidad",
+    "es_vispera_year_nuevo",
+    "es_vispera_semana_santa",
+    "es_vispera_feriado_general",
+    "temperatura_max",
+    "cantidad_lag_1_rel",
+    "cantidad_lag_7_rel",
+    "cantidad_lag_14_rel",
+    "cantidad_roll_mean_7_rel",
+    "cantidad_cv_7",
+    "n_transacciones_lag_1_rel",
+    "prop_grandes_lag_1",
+    "precio_promedio_pct_7",
+    "regimen_precio"
+  ],
+  "ventana_base": 28,
+  "lags_target": [
+    1,
+    7,
+    14
+  ],
+  "ventana_corta": 7,
+  "regimen_precio_congelado": {
+    "REGULAR": 1,
+    "PREMIUM": 1,
+    "GLP": 3
+  },
+  "fecha_entrenamiento": "2026-08-31",
+  "metricas_holdout": [
+    {
+      "producto": "BIODIESEL",
+      "modelo": "ridge",
+      "mase": 0.6546147800859926,
+      "mae": 91.65650330525564,
+      "rmse": 139.94494489136818,
+      "mape": 42.78805058414077,
+      "r2": 0.00626701386594386
+    },
+    {
+      "producto": "BIODIESEL",
+      "modelo": "naive_estacional",
+      "mase": 0.8563041746775698,
+      "mae": 119.89623333333336,
+      "rmse": 190.6847255845511,
+      "mape": 48.907543584857066,
+      "r2": -0.844960563837295
+    },
+    {
+      "producto": "GLP",
+      "modelo": "ridge",
+      "mase": 0.6617266680866912,
+      "mae": 179.11003700759244,
+      "rmse": 233.29488067253882,
+      "mape": 5.819315252540745,
+      "r2": 0.16006141659210726
+    },
+    {
+      "producto": "GLP",
+      "modelo": "naive_estacional",
+      "mase": 0.7475999153797053,
+      "mae": 202.35341111111111,
+      "rmse": 266.06454913007275,
+      "mape": 6.634363194348322,
+      "r2": -0.09247407128532892
+    },
+    {
+      "producto": "PREMIUM",
+      "modelo": "ridge",
+      "mase": 0.831170020629798,
+      "mae": 60.9882479347145,
+      "rmse": 79.04308636196407,
+      "mape": 12.083786264552538,
+      "r2": 0.01881095843138536
+    },
+    {
+      "producto": "PREMIUM",
+      "modelo": "naive_estacional",
+      "mase": 1.1256632689937944,
+      "mae": 82.59709666666667,
+      "rmse": 102.50658079327233,
+      "mape": 16.33090776432197,
+      "r2": -0.6501689261253922
+    },
+    {
+      "producto": "REGULAR",
+      "modelo": "ridge",
+      "mase": 0.7399206204755104,
+      "mae": 80.62868634233003,
+      "rmse": 104.58723783167916,
+      "mape": 9.545207022571562,
+      "r2": 0.2936867237409716
+    },
+    {
+      "producto": "REGULAR",
+      "modelo": "naive_estacional",
+      "mase": 0.9085713440008973,
+      "mae": 99.00644999999999,
+      "rmse": 133.34202420260172,
+      "mape": 11.852968178563819,
+      "r2": -0.14808507234178347
+    }
+  ]
+}

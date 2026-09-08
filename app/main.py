@@ -1,28 +1,38 @@
+from contextlib import asynccontextmanager
+
 import gradio as gr
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import Base, engine
-from app.models import (
-    datos_meteorologicos,
-    indice_precio_combustibles,
-    precio_wti,
-    prediccion,
-    tipo_cambio,
-    usuarios,
-    ventas,
-)
+
+# Importar los modelos registra sus tablas en Base.metadata: create_all solo crea las
+# de los modelos importados aquí. Son las dos únicas tablas del sistema.
+from app.models import historial, usuarios
 from app.routers import auth as auth_router
-from app.routers import etl as etl_router
+from app.routers import prediccion as prediccion_router
+from app.services.prediccion.servicio import cargar_artefactos
 from app.ui.auth import autenticar
+from app.ui.estilos import CSS
 from app.ui.inicio import demo as inicio_demo
 from app.ui.login import demo as login_demo
 from app.ui.registro import demo as registro_demo
 
 Base.metadata.create_all(bind=engine)
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Carga los 3 modelos .joblib + config_servicio.json una sola vez al arrancar.
+    cargar_artefactos()
+    yield
+
+
 app = FastAPI(
-    title="API BENZIN AI", description="Backend for BENZIN AI", version="1.0.0"
+    title="API BENZIN AI",
+    description="Backend for BENZIN AI",
+    version="1.0.0",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -34,7 +44,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router.router)
-app.include_router(etl_router.router)
+app.include_router(prediccion_router.router)
 
 # Fuerza modo claro al cargar, sin importar el tema del sistema/navegador
 FORCE_LIGHT_JS = """
@@ -47,17 +57,28 @@ function() {
 }
 """
 
+# En Gradio 6 el CSS ya no se pasa al constructor de Blocks (solo a launch(), que aquí
+# nunca se llama): en apps montadas va en mount_gradio_app.
 # "/registro" y "/login" quedan fuera de auth: son las páginas públicas de entrada
-app = gr.mount_gradio_app(app, registro_demo, path="/registro", js=FORCE_LIGHT_JS)
-app = gr.mount_gradio_app(app, login_demo, path="/login", js=FORCE_LIGHT_JS)
+app = gr.mount_gradio_app(
+    app, registro_demo, path="/registro", js=FORCE_LIGHT_JS, css=CSS
+)
+app = gr.mount_gradio_app(app, login_demo, path="/login", js=FORCE_LIGHT_JS, css=CSS)
 
 # "/inicio" y sus sub-páginas (subir_archivo, ver_predicciones, graficos) comparten
 # la misma sesión de login porque viven en un único Blocks montado con demo.route().
 app = gr.mount_gradio_app(
-    app, inicio_demo, path="/inicio", auth=autenticar, js=FORCE_LIGHT_JS
+    app, inicio_demo, path="/inicio", auth=autenticar, js=FORCE_LIGHT_JS, css=CSS
 )
 
 
 @app.get("/")
 def health_check():
-    return {"message": "backend working"}
+    from app.services.prediccion.servicio import obtener_artefactos
+
+    art = obtener_artefactos()
+    return {
+        "message": "backend working",
+        "modelos_cargados": art.productos,
+        "modelo": art.config["modelo"],
+    }
