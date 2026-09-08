@@ -15,6 +15,7 @@ from app.services.prediccion.servicio import (
     predecir_rango,
     ultimo_dia_historial,
 )
+from app.utils.validaciones import ErrorValidacion, validar_fecha
 
 PRODUCTOS = ["REGULAR", "PREMIUM", "GLP"]
 
@@ -58,8 +59,15 @@ SPINNER_HTML = (
 )
 
 
+# Filtro de tecleo del navegador: en los campos de fecha solo entran dígitos y
+# guiones, con el largo justo de AAAA-MM-DD. El formato lo verifica `validar_fecha`
+# en el servidor; esto solo evita que el usuario llegue a escribir letras.
+SOLO_FECHA_JS = "(v) => (v || '').replace(/[^0-9-]/g, '').slice(0, 10)"
+
+
 def _parse_fecha(fecha_str: str) -> date:
-    return pd.to_datetime(fecha_str).date()
+    """AAAA-MM-DD estricto. Lanza `ErrorValidacion` con el motivo exacto."""
+    return validar_fecha(fecha_str)
 
 
 # --------------------------------------------------------------------------- #
@@ -113,8 +121,8 @@ def fecha_sugerida(producto: str) -> str:
 def predecir_ui(producto: str, fecha_str: str):
     try:
         fecha = _parse_fecha(fecha_str)
-    except Exception:
-        return _error("Fecha inválida", "Usa el formato AAAA-MM-DD.")
+    except ErrorValidacion as e:
+        return _error("Fecha inválida", str(e))
 
     db = SessionLocal()
     try:
@@ -151,8 +159,8 @@ def predecir_ui(producto: str, fecha_str: str):
 def predecir_rango_ui(producto: str, fecha_inicio_str: str, dias: int):
     try:
         fecha_inicio = _parse_fecha(fecha_inicio_str)
-    except Exception:
-        return None, _error("Fecha inválida", "Usa el formato AAAA-MM-DD."), None
+    except ErrorValidacion as e:
+        return None, _error("Fecha inválida", str(e)), None
 
     db = SessionLocal()
     try:
@@ -324,10 +332,13 @@ with gr.Blocks(title="Inicio") as demo:
             )
             with gr.Row():
                 p_producto = gr.Dropdown(PRODUCTOS, value="REGULAR", label="Producto")
-                p_fecha = gr.Textbox(value=_FECHA_INICIAL, label="Fecha (AAAA-MM-DD)")
+                p_fecha = gr.Textbox(
+                    value=_FECHA_INICIAL, label="Fecha (AAAA-MM-DD)", max_length=10
+                )
             p_boton = gr.Button("Predecir", variant="primary")
             p_resultado = gr.HTML()
 
+            p_fecha.input(fn=None, inputs=p_fecha, outputs=p_fecha, js=SOLO_FECHA_JS)
             p_producto.change(fecha_sugerida, inputs=p_producto, outputs=p_fecha)
             p_boton.click(
                 predecir_ui,
@@ -347,7 +358,9 @@ with gr.Blocks(title="Inicio") as demo:
             with gr.Row():
                 r_producto = gr.Dropdown(PRODUCTOS, value="REGULAR", label="Producto")
                 r_fecha = gr.Textbox(
-                    value=_FECHA_INICIAL, label="Fecha inicio (AAAA-MM-DD)"
+                    value=_FECHA_INICIAL,
+                    label="Fecha inicio (AAAA-MM-DD)",
+                    max_length=10,
                 )
                 r_dias = gr.Slider(
                     1, MAX_HORIZONTE_DIAS, value=7, step=1, label="Días a predecir"
@@ -359,6 +372,7 @@ with gr.Blocks(title="Inicio") as demo:
             )
             r_tabla = gr.Dataframe(label="Detalle")
 
+            r_fecha.input(fn=None, inputs=r_fecha, outputs=r_fecha, js=SOLO_FECHA_JS)
             r_producto.change(fecha_sugerida, inputs=r_producto, outputs=r_fecha)
             r_boton.click(
                 predecir_rango_ui,

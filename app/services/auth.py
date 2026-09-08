@@ -7,11 +7,21 @@ from app.utils.password import (
     validate_password_strength,
     verify_password,
 )
+from app.utils.validaciones import validar_datos_registro
 
 
 def register_service(
     nombres, apellidos, dni, nro_celular, username, password, db: Session
 ):
+    # Formato de los campos antes de tocar la base: DNI de 8 dígitos, celular de 9,
+    # nombres sin números. Lanza ErrorValidacion (subclase de ValueError) al primer
+    # fallo. Devuelve los valores ya normalizados (sin espacios sobrantes).
+    datos = validar_datos_registro(nombres, apellidos, dni, nro_celular, username)
+    nombres = datos["nombres"]
+    apellidos = datos["apellidos"]
+    dni = datos["dni"]
+    nro_celular = datos["nro_celular"]
+    username = datos["username"]
 
     # verificar si no existe un usuario con el mismo username
     stmt_username = select(Usuario).where(Usuario.username == username)
