@@ -10,3 +10,6 @@ wheels/
 .venv
 .env
 exportar_datos.py
+
+.pytest_cache
+.gradio
