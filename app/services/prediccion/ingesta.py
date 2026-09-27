@@ -55,7 +55,9 @@ def _ultimo_valor_conocido(
     """(precio_promedio, proporcion) del último día guardado ANTES de ``fecha_limite``."""
     registro = (
         db.query(HistorialVenta)
-        .filter(HistorialVenta.producto == producto, HistorialVenta.fecha < fecha_limite)
+        .filter(
+            HistorialVenta.producto == producto, HistorialVenta.fecha < fecha_limite
+        )
         .order_by(HistorialVenta.fecha.desc())
         .first()
     )
@@ -104,7 +106,10 @@ def ingerir_ventas_mensuales(db: Session, contenido: bytes) -> dict:
     for producto, grupo in df.groupby("producto", sort=False):
         grupo = grupo.sort_values("fecha").copy()
         precio_previo, prop_previa = _ultimo_valor_conocido(db, producto, fecha_min)
-        semilla = {"precio_promedio": precio_previo, "proporcion_transacciones_grandes": prop_previa}
+        semilla = {
+            "precio_promedio": precio_previo,
+            "proporcion_transacciones_grandes": prop_previa,
+        }
         for columna in COLUMNAS_ARRASTRE:
             grupo[columna] = grupo[columna].astype("float64").ffill()
             if semilla[columna] is not None:

@@ -167,10 +167,14 @@ def calcular_features_dia(
     # Días sin ventas -> ceros reales en cantidad y nº de transacciones;
     # precio y proporción se arrastran (COLS_FFILL del notebook). El ffill de
     # precio_promedio también resuelve precio_previsto=None (arrastre del último).
-    s["cantidad"] = np.maximum(s["cantidad"].fillna(0.0), 0.0)  # truncar en 0 por seguridad
+    s["cantidad"] = np.maximum(
+        s["cantidad"].fillna(0.0), 0.0
+    )  # truncar en 0 por seguridad
     s["n_transacciones_totales"] = s["n_transacciones_totales"].fillna(0.0)
     s["precio_promedio"] = s["precio_promedio"].ffill()
-    s["proporcion_transacciones_grandes"] = s["proporcion_transacciones_grandes"].ffill()
+    s["proporcion_transacciones_grandes"] = s[
+        "proporcion_transacciones_grandes"
+    ].ffill()
 
     cantidad = s["cantidad"]
 
@@ -188,9 +192,15 @@ def calcular_features_dia(
 
     # Internas: nunca contemporáneas; n_transacciones frente a su propia media móvil.
     base_trans = (
-        s["n_transacciones_totales"].shift(1).rolling(VENTANA_BASE).mean().replace(0, np.nan)
+        s["n_transacciones_totales"]
+        .shift(1)
+        .rolling(VENTANA_BASE)
+        .mean()
+        .replace(0, np.nan)
     )
-    razones["n_transacciones_lag_1_rel"] = s["n_transacciones_totales"].shift(1) / base_trans
+    razones["n_transacciones_lag_1_rel"] = (
+        s["n_transacciones_totales"].shift(1) / base_trans
+    )
     razones["prop_grandes_lag_1"] = s["proporcion_transacciones_grandes"].shift(1)
 
     # Precio propio: variación semanal (contemporánea, usa el precio del día objetivo).
@@ -204,9 +214,7 @@ def calcular_features_dia(
         )
 
     # --- Ensamblado de las 17 features en el orden canónico ---
-    pe_holidays = holidays.PE(
-        years=range(int(s.index.min().year), int(fecha.year) + 1)
-    )
+    pe_holidays = holidays.PE(years=range(int(s.index.min().year), int(fecha.year) + 1))
     features = _calendario(fecha, pe_holidays)
     features["temperatura_max"] = float(temperatura_max)
     for nombre, serie in razones.items():

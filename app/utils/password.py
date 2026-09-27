@@ -13,8 +13,9 @@ TRADUCCIONES = {
     "Predictable substitutions like '@' instead of 'a' don't help much": "Sustituciones predecibles como '@' en lugar de 'a' no ayudan mucho.",
     "Capitalization doesn't help very much": "Usar mayúsculas no ayuda mucho.",
     "All-uppercase is almost as easy to guess as all-lowercase": "Usar solo mayúsculas es tan fácil de adivinar como usar solo minúsculas.",
-    "This is a top-10 common password.": "Esta es una de las 10 contraseñas más comunes."
+    "This is a top-10 common password.": "Esta es una de las 10 contraseñas más comunes.",
 }
+
 
 def validate_password_strength(password, user_data=None):
     if len(password) < 8 or len(password) > 128:
@@ -26,20 +27,20 @@ def validate_password_strength(password, user_data=None):
 
     if score < 3:
         feedback = results.get("feedback", {})
-        
+
         # Obtener los textos en inglés
         raw_warning = feedback.get("warning", "")
         raw_suggestions = feedback.get("suggestions", [])
-        
+
         # Traducir (si no existe en el diccionario, devuelve el texto original temporalmente)
         warning = TRADUCCIONES.get(raw_warning, raw_warning)
         suggestions = " ".join([TRADUCCIONES.get(s, s) for s in raw_suggestions])
-        
+
         error_msg = f"{warning} {suggestions}".strip()
-        
+
         if not error_msg:
             error_msg = "La contraseña es demasiado fácil de adivinar."
-            
+
         raise ValueError(error_msg)
 
     return score

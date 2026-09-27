@@ -55,12 +55,19 @@ FORCE_LIGHT_JS = leer_js("forzar_claro.js")
 app = gr.mount_gradio_app(
     app, registro_demo, path="/registro", js=FORCE_LIGHT_JS, css_paths=[CSS_PATH]
 )
-app = gr.mount_gradio_app(app, login_demo, path="/login", js=FORCE_LIGHT_JS, css_paths=[CSS_PATH])
+app = gr.mount_gradio_app(
+    app, login_demo, path="/login", js=FORCE_LIGHT_JS, css_paths=[CSS_PATH]
+)
 
 # "/inicio" es un único Blocks con pestañas (predicción diaria, rango, carga de ventas,
 # métricas): todas quedan detrás de la misma sesión de login.
 app = gr.mount_gradio_app(
-    app, inicio_demo, path="/inicio", auth=autenticar, js=FORCE_LIGHT_JS, css_paths=[CSS_PATH]
+    app,
+    inicio_demo,
+    path="/inicio",
+    auth=autenticar,
+    js=FORCE_LIGHT_JS,
+    css_paths=[CSS_PATH],
 )
 
 

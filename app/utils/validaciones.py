@@ -53,19 +53,26 @@ def validar_dni(valor) -> str:
     if not valor:
         raise ErrorValidacion("dni", "El DNI no puede estar vacío.")
     if not _SOLO_DIGITOS_RE.match(valor):
-        raise ErrorValidacion("dni", "El DNI solo admite números, sin letras ni signos.")
+        raise ErrorValidacion(
+            "dni", "El DNI solo admite números, sin letras ni signos."
+        )
     if len(valor) != LARGO_DNI:
-        raise ErrorValidacion("dni", f"El DNI debe tener exactamente {LARGO_DNI} dígitos.")
+        raise ErrorValidacion(
+            "dni", f"El DNI debe tener exactamente {LARGO_DNI} dígitos."
+        )
     return valor
 
 
 def validar_nro_celular(valor) -> str:
     valor = _texto(valor)
     if not valor:
-        raise ErrorValidacion("nro_celular", "El número de celular no puede estar vacío.")
+        raise ErrorValidacion(
+            "nro_celular", "El número de celular no puede estar vacío."
+        )
     if not _SOLO_DIGITOS_RE.match(valor):
         raise ErrorValidacion(
-            "nro_celular", "El número de celular solo admite números, sin letras ni signos."
+            "nro_celular",
+            "El número de celular solo admite números, sin letras ni signos.",
         )
     if len(valor) != LARGO_CELULAR:
         raise ErrorValidacion(
@@ -80,7 +87,9 @@ def validar_username(valor) -> str:
     if not valor:
         raise ErrorValidacion("username", "El usuario no puede estar vacío.")
     if len(valor) < 4 or len(valor) > 30:
-        raise ErrorValidacion("username", "El usuario debe tener entre 4 y 30 caracteres.")
+        raise ErrorValidacion(
+            "username", "El usuario debe tener entre 4 y 30 caracteres."
+        )
     return valor
 
 
@@ -90,7 +99,9 @@ def validar_fecha(valor, campo: str = "fecha") -> date:
     if not valor:
         raise ErrorValidacion(campo, "La fecha no puede estar vacía.")
     if any(c.isalpha() for c in valor):
-        raise ErrorValidacion(campo, "La fecha no admite letras. Usa el formato AAAA-MM-DD.")
+        raise ErrorValidacion(
+            campo, "La fecha no admite letras. Usa el formato AAAA-MM-DD."
+        )
     if not _FECHA_RE.match(valor):
         raise ErrorValidacion(campo, "Formato de fecha inválido. Usa AAAA-MM-DD.")
     try:

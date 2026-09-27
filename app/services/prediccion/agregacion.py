@@ -131,7 +131,9 @@ def limpiar_datos(df: pd.DataFrame) -> pd.DataFrame:
         names=["fecha", "producto"],
     )
     df_diario = (
-        df_diario.set_index(["fecha", "producto"]).reindex(indice_completo).reset_index()
+        df_diario.set_index(["fecha", "producto"])
+        .reindex(indice_completo)
+        .reset_index()
     )
 
     for c in [
@@ -142,8 +144,12 @@ def limpiar_datos(df: pd.DataFrame) -> pd.DataFrame:
     ]:
         df_diario[c] = df_diario[c].fillna(0)
 
-    df_diario["n_transacciones_totales"] = df_diario["n_transacciones_totales"].astype(int)
-    df_diario["n_transacciones_grandes"] = df_diario["n_transacciones_grandes"].astype(int)
+    df_diario["n_transacciones_totales"] = df_diario["n_transacciones_totales"].astype(
+        int
+    )
+    df_diario["n_transacciones_grandes"] = df_diario["n_transacciones_grandes"].astype(
+        int
+    )
     df_diario["n_transacciones_normales"] = (
         df_diario["n_transacciones_totales"] - df_diario["n_transacciones_grandes"]
     )

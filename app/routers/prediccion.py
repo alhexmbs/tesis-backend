@@ -28,7 +28,9 @@ router = APIRouter(prefix="/api/prediccion", tags=["Predicción"])
 
 
 def _error_422(e: Exception) -> HTTPException:
-    return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    return HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e)
+    )
 
 
 @router.post("/predecir", response_model=PredecirResponse)

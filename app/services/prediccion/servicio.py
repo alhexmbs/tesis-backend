@@ -142,7 +142,9 @@ def _historial_df(db: Session, producto: str) -> pd.DataFrame:
                 "cantidad": float(r.cantidad),
                 "precio_promedio": float(r.precio_promedio),
                 "n_transacciones_totales": int(r.n_transacciones_totales),
-                "proporcion_transacciones_grandes": float(r.proporcion_transacciones_grandes),
+                "proporcion_transacciones_grandes": float(
+                    r.proporcion_transacciones_grandes
+                ),
             }
             for r in registros
         ],
@@ -153,7 +155,9 @@ def _historial_df(db: Session, producto: str) -> pd.DataFrame:
 def _predecir(art: Artefactos, producto: str, features: dict, base_28: float) -> float:
     # DataFrame con nombres de columna en el orden de entrenamiento: evita el
     # warning de sklearn y garantiza el orden correcto de las 17 features.
-    X = pd.DataFrame([[features[n] for n in art.orden_features]], columns=art.orden_features)
+    X = pd.DataFrame(
+        [[features[n] for n in art.orden_features]], columns=art.orden_features
+    )
     razon = float(art.modelos[producto].predict(X)[0])
     return max(razon * base_28, 0.0)
 
@@ -214,7 +218,9 @@ def _horizonte(previos: pd.DataFrame, fecha: date) -> tuple[date, int]:
     return ultimo_real, (pd.Timestamp(fecha).date() - ultimo_real).days
 
 
-def _validar_horizonte(producto: str, ultimo_real: date, fecha: date, dias: int) -> None:
+def _validar_horizonte(
+    producto: str, ultimo_real: date, fecha: date, dias: int
+) -> None:
     """Corta las fechas demasiado lejos del último día con ventas cargadas.
 
     Sin ventas que refresquen la serie, cada día extra se apoya en estimaciones del
@@ -274,7 +280,10 @@ def _puentear_historial(
 
     logger.info(
         "Estimados %s días sin ventas reales de %s (%s a %s) para poder predecir.",
-        len(estimados), producto, estimados[0], estimados[-1],
+        len(estimados),
+        producto,
+        estimados[0],
+        estimados[-1],
     )
     return hist_aug, estimados
 

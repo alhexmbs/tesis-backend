@@ -218,9 +218,13 @@ def cargar_xlsx_ui(archivos, progress=gr.Progress()):
                 f"{', '.join(r['productos'])})"
             )
             if r["dias_sin_ventas"]:
-                detalle += f" · {r['dias_sin_ventas']} día(s) sin ventas guardados como 0"
+                detalle += (
+                    f" · {r['dias_sin_ventas']} día(s) sin ventas guardados como 0"
+                )
             if r["filas_omitidas"]:
-                detalle += f" · {r['filas_omitidas']} omitido(s) por falta de precio previo"
+                detalle += (
+                    f" · {r['filas_omitidas']} omitido(s) por falta de precio previo"
+                )
             lineas.append(detalle + "</li>")
     finally:
         db.close()

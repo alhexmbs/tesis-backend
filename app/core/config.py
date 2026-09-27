@@ -2,9 +2,9 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Artefactos de ML (modelos .joblib + config del servicio). Van en una ruta de
-# artefactos separada, NO en app/models/ (que contiene modelos ORM). La ruta se
-# define aquí, junto al resto de la configuración.
+# Artefactos de ML (modelos .joblib + config del servicio).
+# La ruta se define aquí, junto al resto de la configuración.
+
 ARTEFACTOS_DIR = Path(__file__).resolve().parent.parent / "artefactos"
 MODELOS_DIR = ARTEFACTOS_DIR / "modelos"
 CONFIG_SERVICIO_PATH = ARTEFACTOS_DIR / "config_servicio.json"
