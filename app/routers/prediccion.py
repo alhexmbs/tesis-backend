@@ -16,6 +16,7 @@ from app.schemas.prediccion import (
 from app.services.prediccion.features import HistorialInsuficiente
 from app.services.prediccion.ingesta import ArchivoInvalido, ingerir_ventas_mensuales
 from app.services.prediccion.servicio import (
+    FechaEnPasado,
     ProductoNoServido,
     listar_historial,
     metricas_modelo,
@@ -35,9 +36,9 @@ def predecir(request: PredecirRequest, db: Annotated[Session, Depends(get_db)]):
     """Predice los galones de un producto para una fecha. Si la fecha queda varios
     días por delante del último día del historial, esos días intermedios se estiman
     con el propio modelo y la respuesta lo informa en ``dias_estimados`` y ``notas``.
-    Si el historial es insuficiente (< 28 días previos) o la fecha pasa de 15 días
-    desde el último día cargado, responde 422 en lugar de una predicción
-    silenciosamente incorrecta."""
+    Si el historial es insuficiente (< 28 días previos), la fecha pasa de 15 días
+    desde el último día cargado o la fecha ya pasó, responde 422 en lugar de una
+    predicción silenciosamente incorrecta."""
     try:
         return predecir_dia(
             db,
@@ -45,7 +46,7 @@ def predecir(request: PredecirRequest, db: Annotated[Session, Depends(get_db)]):
             fecha=request.fecha,
             temperatura_max=request.temperatura_max,
         )
-    except (ProductoNoServido, HistorialInsuficiente) as e:
+    except (ProductoNoServido, HistorialInsuficiente, FechaEnPasado) as e:
         raise _error_422(e)
 
 
@@ -55,7 +56,9 @@ def predecir_rango_endpoint(
 ):
     """Predicción recursiva de varios días: cada día predicho se incorpora al
     historial para el siguiente. El rango se recorta para no pasar de 15 días desde
-    el último día con ventas cargadas; el recorte se informa en ``notas``."""
+    el último día con ventas cargadas; el recorte se informa en ``notas``. La fecha de
+    inicio no puede ser anterior a hoy: hacia atrás no se pronostica, se consulta el
+    historial."""
     try:
         return predecir_rango(
             db,
@@ -63,7 +66,7 @@ def predecir_rango_endpoint(
             fecha_inicio=request.fecha_inicio,
             dias=request.dias,
         )
-    except (ProductoNoServido, HistorialInsuficiente) as e:
+    except (ProductoNoServido, HistorialInsuficiente, FechaEnPasado) as e:
         raise _error_422(e)
 
 

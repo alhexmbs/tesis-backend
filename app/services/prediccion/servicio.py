@@ -48,6 +48,16 @@ class ProductoNoServido(ValueError):
     """Se pidió un producto fuera de los 3 servidos (REGULAR, PREMIUM, GLP)."""
 
 
+class FechaEnPasado(ValueError):
+    """Se pidió una predicción para un día que ya ocurrió.
+
+    Pronosticar hacia atrás no tiene sentido de negocio: ese día ya se vendió y el
+    dato real vive (o vivirá, al cargar el reporte) en el historial. Se valida en el
+    servicio y no en el schema de Pydantic porque hay dos entradas a la predicción:
+    el router `/api/prediccion` y la UI de Gradio, que llama al servicio directo.
+    """
+
+
 @dataclass
 class Artefactos:
     config: dict
@@ -104,6 +114,16 @@ def _validar_producto(producto: str, art: Artefactos) -> None:
         raise ProductoNoServido(
             f"Producto '{producto}' no disponible. Productos servidos: "
             f"{', '.join(art.productos)}."
+        )
+
+
+def _validar_fecha_futura(fecha: date, etiqueta: str = "La fecha") -> None:
+    """Rechaza las fechas anteriores a hoy. Hoy sí se permite: el día aún no cierra."""
+    hoy = date.today()
+    if fecha < hoy:
+        raise FechaEnPasado(
+            f"{etiqueta} {fecha} ya pasó. El sistema solo pronostica de hoy ({hoy}) "
+            "en adelante; para ver lo que se vendió ese día, revisa el historial."
         )
 
 
@@ -273,9 +293,12 @@ def predecir_dia(
     ``precio_referencia``, solo informativo.
 
     ``temperatura_max`` (opcional): si no se pasa, se pide el pronóstico de Open-Meteo.
+
+    Solo se predice de hoy en adelante: una fecha ya pasada lanza ``FechaEnPasado``.
     """
     art = obtener_artefactos()
     _validar_producto(producto, art)
+    _validar_fecha_futura(fecha)
 
     hist = _historial_df(db, producto)
     previos = hist[pd.to_datetime(hist["fecha"]) < pd.Timestamp(fecha)]
@@ -341,6 +364,7 @@ def predecir_rango(
     """
     art = obtener_artefactos()
     _validar_producto(producto, art)
+    _validar_fecha_futura(fecha_inicio, "La fecha de inicio")
 
     hist = _historial_df(db, producto)
     previos = hist[pd.to_datetime(hist["fecha"]) < pd.Timestamp(fecha_inicio)]

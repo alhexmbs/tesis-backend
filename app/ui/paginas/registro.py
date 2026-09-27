@@ -2,6 +2,7 @@ import gradio as gr
 
 from app.database import SessionLocal
 from app.services.auth import register_service
+from app.ui.componentes import banner
 from app.utils.validaciones import LARGO_CELULAR, LARGO_DNI, ErrorValidacion
 
 SIN_ERROR = gr.update(value="", visible=False)
@@ -16,16 +17,8 @@ SOLO_LETRAS_JS = "(v) => (v || '').replace(/[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ
 SOLO_DIGITOS_JS = r"(v) => (v || '').replace(/\D/g, '').slice(0, %d)"
 
 
-def _banner(tipo: str, icono: str, mensaje: str) -> str:
-    return (
-        f'<div class="msg msg-{tipo}">'
-        f'<div class="msg-titulo">{icono} {mensaje}</div>'
-        "</div>"
-    )
-
-
 def error_en(mensaje):
-    return gr.update(value=_banner("err", "⚠️", mensaje), visible=True)
+    return gr.update(value=banner("err", "⚠️", mensaje), visible=True)
 
 
 def _salida(campo: str | None = None, mensaje: str = "", resultado: str = ""):
@@ -59,7 +52,7 @@ def registrar(nombres, apellidos, dni, nro_celular, username, password):
         return _salida("nro_celular", "El número de celular ya ha sido registrado.")
 
     return _salida(
-        resultado=_banner(
+        resultado=banner(
             "ok", "✅", "Usuario registrado correctamente. Ya puedes iniciar sesión."
         )
     )

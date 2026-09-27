@@ -1,11 +1,12 @@
-"""CSS compartido por las tres páginas Gradio (login, registro, inicio).
+/*
+ * CSS compartido por las tres páginas Gradio (login, registro, inicio).
+ *
+ * Cada `gr.Blocks` se monta como app independiente, así que la hoja de estilos se
+ * pasa en cada `mount_gradio_app` (css_paths): no hay un `<head>` común donde
+ * inyectarla una sola vez.
+ * Los colores son fijos porque `main.FORCE_LIGHT_JS` obliga el tema claro.
+ */
 
-Cada `gr.Blocks` se monta como app independiente, así que la hoja de estilos se
-pasa a mano en cada una: no hay un `<head>` común donde inyectarla una sola vez.
-Los colores son fijos porque `main.FORCE_LIGHT_JS` obliga el tema claro.
-"""
-
-CSS = """
 /* ---------------------------------------------------------------- Mensajes */
 .msg {
     border-radius: 12px;
@@ -15,11 +16,13 @@ CSS = """
     line-height: 1.55;
     box-shadow: 0 2px 10px rgba(15, 23, 42, 0.08);
 }
+
 .msg-titulo {
     font-size: 1.15rem;
     font-weight: 700;
     letter-spacing: 0.2px;
 }
+
 .msg-cuerpo { margin-top: 8px; }
 .msg-pie { margin-top: 10px; font-size: 0.9rem; opacity: 0.85; }
 .msg ul { margin: 10px 0 0 0; padding-left: 22px; }
@@ -36,12 +39,14 @@ CSS = """
     line-height: 1.1;
     margin: 10px 0 4px 0;
 }
+
 .cifra .unidad {
     font-size: 1rem;
     font-weight: 600;
     opacity: 0.75;
     margin-left: 8px;
 }
+
 
 /* Notas informativas que devuelve el servicio */
 .msg-notas { list-style: none; padding-left: 0 !important; }
@@ -53,6 +58,8 @@ CSS = """
 .msg-archivos li { margin: 5px 0; }
 .ico-ok  { color: #16a34a; font-weight: 800; }
 .ico-err { color: #dc2626; font-weight: 800; }
+
+
 
 /* --------------------------------------------------------------- Cargando */
 .cargando {
@@ -67,6 +74,7 @@ CSS = """
     color: #10264d;
     font-weight: 600;
 }
+
 .cargando-circulo {
     width: 20px;
     height: 20px;
@@ -78,6 +86,7 @@ CSS = """
 }
 @keyframes girar { to { transform: rotate(360deg); } }
 
+
 /* ------------------------------------------------------------------ Reloj */
 .reloj {
     font-size: 1.05rem;
@@ -85,12 +94,16 @@ CSS = """
     color: #334155;
 }
 
+
+
 /* -------------------------------------------------------- Cerrar sesión */
 .fila-cerrar-sesion {
     display: flex;
     justify-content: flex-end;
     margin-top: 22px;
 }
+
+
 a.boton-cerrar-sesion {
     display: inline-flex;
     align-items: center;
@@ -107,4 +120,3 @@ a.boton-cerrar-sesion {
 }
 a.boton-cerrar-sesion:hover { background: #991b1b; }
 a.boton-cerrar-sesion:active { transform: translateY(1px); }
-"""

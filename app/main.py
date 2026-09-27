@@ -13,10 +13,10 @@ from app.routers import auth as auth_router
 from app.routers import prediccion as prediccion_router
 from app.services.prediccion.servicio import cargar_artefactos
 from app.ui.auth import autenticar
-from app.ui.estilos import CSS
-from app.ui.inicio import demo as inicio_demo
-from app.ui.login import demo as login_demo
-from app.ui.registro import demo as registro_demo
+from app.ui.componentes import CSS_PATH, leer_js
+from app.ui.paginas.inicio import demo as inicio_demo
+from app.ui.paginas.login import demo as login_demo
+from app.ui.paginas.registro import demo as registro_demo
 
 Base.metadata.create_all(bind=engine)
 
@@ -46,29 +46,21 @@ app.add_middleware(
 app.include_router(auth_router.router)
 app.include_router(prediccion_router.router)
 
-# Fuerza modo claro al cargar, sin importar el tema del sistema/navegador
-FORCE_LIGHT_JS = """
-function() {
-    const url = new URL(window.location.href);
-    if (url.searchParams.get('__theme') !== 'light') {
-        url.searchParams.set('__theme', 'light');
-        window.location.replace(url.href);
-    }
-}
-"""
+# Fuerza modo claro al cargar, sin importar el tema del sistema/navegador.
+FORCE_LIGHT_JS = leer_js("forzar_claro.js")
 
 # En Gradio 6 el CSS ya no se pasa al constructor de Blocks (solo a launch(), que aquí
 # nunca se llama): en apps montadas va en mount_gradio_app.
 # "/registro" y "/login" quedan fuera de auth: son las páginas públicas de entrada
 app = gr.mount_gradio_app(
-    app, registro_demo, path="/registro", js=FORCE_LIGHT_JS, css=CSS
+    app, registro_demo, path="/registro", js=FORCE_LIGHT_JS, css_paths=[CSS_PATH]
 )
-app = gr.mount_gradio_app(app, login_demo, path="/login", js=FORCE_LIGHT_JS, css=CSS)
+app = gr.mount_gradio_app(app, login_demo, path="/login", js=FORCE_LIGHT_JS, css_paths=[CSS_PATH])
 
-# "/inicio" y sus sub-páginas (subir_archivo, ver_predicciones, graficos) comparten
-# la misma sesión de login porque viven en un único Blocks montado con demo.route().
+# "/inicio" es un único Blocks con pestañas (predicción diaria, rango, carga de ventas,
+# métricas): todas quedan detrás de la misma sesión de login.
 app = gr.mount_gradio_app(
-    app, inicio_demo, path="/inicio", auth=autenticar, js=FORCE_LIGHT_JS, css=CSS
+    app, inicio_demo, path="/inicio", auth=autenticar, js=FORCE_LIGHT_JS, css_paths=[CSS_PATH]
 )
 
 

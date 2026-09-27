@@ -8,56 +8,28 @@ from app.services.prediccion.features import HistorialInsuficiente
 from app.services.prediccion.ingesta import ArchivoInvalido, ingerir_ventas_mensuales
 from app.services.prediccion.servicio import (
     MAX_HORIZONTE_DIAS,
+    FechaEnPasado,
     ProductoNoServido,
-    listar_historial,
     metricas_modelo,
     predecir_dia,
     predecir_rango,
     ultimo_dia_historial,
 )
+from app.ui.componentes import (
+    CERRAR_SESION_HTML,
+    RELOJ_HTML,
+    SPINNER_HTML,
+    banner,
+    error_html,
+    leer_js,
+    notas_html,
+)
 from app.utils.validaciones import ErrorValidacion, validar_fecha
 
 PRODUCTOS = ["REGULAR", "PREMIUM", "GLP"]
 
-RELOJ_HTML = '<div class="reloj">🕒 <span id="reloj-inicio"></span></div>'
-
-RELOJ_JS_ON_LOAD = """
-function actualizarReloj() {
-    const el = element.querySelector('#reloj-inicio');
-    if (el) {
-        el.textContent = new Date().toLocaleString('es-PE');
-    }
-}
-actualizarReloj();
-setInterval(actualizarReloj, 1000);
-"""
-
-CERRAR_SESION_HTML = (
-    '<div class="fila-cerrar-sesion">'
-    '<a href="/inicio/logout" id="cerrar-sesion" class="boton-cerrar-sesion">'
-    "⏻ Cerrar sesión</a>"
-    "</div>"
-)
-
-CERRAR_SESION_JS_ON_LOAD = """
-const link = element.querySelector('#cerrar-sesion');
-if (link) {
-    link.addEventListener('click', function (e) {
-        e.preventDefault();
-        fetch('/inicio/logout').finally(function () {
-            window.location.href = '/login';
-        });
-    });
-}
-"""
-
-SPINNER_HTML = (
-    '<div class="cargando">'
-    '<span class="cargando-circulo"></span>'
-    "<span>Procesando los reportes… no cierres esta página.</span>"
-    "</div>"
-)
-
+RELOJ_JS_ON_LOAD = leer_js("reloj.js")
+CERRAR_SESION_JS_ON_LOAD = leer_js("cerrar_sesion.js")
 
 # Filtro de tecleo del navegador: en los campos de fecha solo entran dígitos y
 # guiones, con el largo justo de AAAA-MM-DD. El formato lo verifica `validar_fecha`
@@ -65,46 +37,48 @@ SPINNER_HTML = (
 SOLO_FECHA_JS = "(v) => (v || '').replace(/[^0-9-]/g, '').slice(0, 10)"
 
 
-def _parse_fecha(fecha_str: str) -> date:
-    """AAAA-MM-DD estricto. Lanza `ErrorValidacion` con el motivo exacto."""
-    return validar_fecha(fecha_str)
+def _ejecutar(fn, producto: str, fecha_str: str, *args):
+    """Valida la fecha (AAAA-MM-DD estricto), abre la sesión y corre `fn`.
+
+    Devuelve `(resultado, None)` o `(None, html_error)`: los dos predictores
+    comparten los mismos errores esperables y el mismo manejo de la sesión.
+    """
+    try:
+        fecha = validar_fecha(fecha_str)
+    except ErrorValidacion as e:
+        return None, error_html("Fecha inválida", str(e))
+
+    db = SessionLocal()
+    try:
+        return fn(db, producto, fecha, *args), None
+    except (ProductoNoServido, HistorialInsuficiente, FechaEnPasado) as e:
+        return None, error_html("No se pudo predecir", str(e))
+    except Exception as e:
+        return None, error_html("Error inesperado", str(e))
+    finally:
+        db.close()
 
 
-# --------------------------------------------------------------------------- #
-# Mensajes en bloque de color
-# --------------------------------------------------------------------------- #
-def _banner(tipo: str, icono: str, titulo: str, cuerpo: str = "") -> str:
-    """Bloque de color para los resultados. `tipo` es ok | err | info."""
+def _items_contexto(r: dict) -> str:
+    """Filas comunes a los dos resúmenes: precio usado y hasta cuándo hay ventas."""
     return (
-        f'<div class="msg msg-{tipo}">'
-        f'<div class="msg-titulo">{icono} {titulo}</div>'
-        f"{cuerpo}"
-        "</div>"
+        f"<li><b>Precio considerado:</b> S/ {r['precio_referencia']:.2f} "
+        "(el último registrado)</li>"
+        f"<li><b>Ventas cargadas hasta:</b> {r['ultimo_dia_real']}</li>"
     )
-
-
-def _error(titulo: str, detalle: str = "") -> str:
-    cuerpo = f'<div class="msg-cuerpo">{detalle}</div>' if detalle else ""
-    return _banner("err", "⚠️", titulo, cuerpo)
-
-
-def _notas_html(notas: list[str]) -> str:
-    """Notas del servicio en lenguaje llano, para pegar al final del resumen."""
-    if not notas:
-        return ""
-    items = "".join(f"<li>{n}</li>" for n in notas)
-    return f'<ul class="msg-notas">{items}</ul>'
 
 
 # --------------------------------------------------------------------------- #
 # Predicción diaria
 # --------------------------------------------------------------------------- #
 def fecha_sugerida(producto: str) -> str:
-    """Día siguiente al final del historial del producto.
+    """Día siguiente al final del historial, nunca anterior a hoy.
 
-    NO se usa "mañana" según el reloj a propósito: el historial se alimenta con el
-    reporte mensual, así que casi siempre va por detrás del calendario. Proponer una
-    fecha sin los 28 días previos haría fallar el primer clic del usuario.
+    El historial se alimenta con el reporte mensual, así que casi siempre va por
+    detrás del calendario: el día siguiente al último dato cargado suele ser una
+    fecha ya pasada, y hacia atrás no se pronostica. Por eso se propone el más
+    reciente de los dos (último + 1 u hoy). Si el historial quedó muy atrás, el
+    servicio responderá pidiendo cargar el reporte más reciente.
     """
     try:
         db = SessionLocal()
@@ -114,25 +88,15 @@ def fecha_sugerida(producto: str) -> str:
             db.close()
     except Exception:
         ultimo = None
-    base = ultimo if ultimo is not None else date.today()
-    return (base + timedelta(days=1)).isoformat()
+    hoy = date.today()
+    siguiente = (ultimo + timedelta(days=1)) if ultimo is not None else hoy
+    return max(siguiente, hoy).isoformat()
 
 
 def predecir_ui(producto: str, fecha_str: str):
-    try:
-        fecha = _parse_fecha(fecha_str)
-    except ErrorValidacion as e:
-        return _error("Fecha inválida", str(e))
-
-    db = SessionLocal()
-    try:
-        r = predecir_dia(db, producto, fecha)
-    except (ProductoNoServido, HistorialInsuficiente) as e:
-        return _error("No se pudo predecir", str(e))
-    except Exception as e:
-        return _error("Error inesperado", str(e))
-    finally:
-        db.close()
+    r, error = _ejecutar(predecir_dia, producto, fecha_str)
+    if error:
+        return error
 
     # Solo lo que el encargado del grifo puede leer y usar: galones del día, con qué
     # se está comparando y hasta cuándo llegan las ventas cargadas. Las 17 features
@@ -144,33 +108,20 @@ def predecir_ui(producto: str, fecha_str: str):
         "<li><b>Venta diaria promedio del último mes:</b> "
         f"{r['promedio_diario_28']:,.0f} galones</li>"
         f"<li><b>Temperatura máxima esperada:</b> {r['temperatura_max']:.0f} °C</li>"
-        f"<li><b>Precio considerado:</b> S/ {r['precio_referencia']:.2f} "
-        "(el último registrado)</li>"
-        f"<li><b>Ventas cargadas hasta:</b> {r['ultimo_dia_real']}</li>"
+        f"{_items_contexto(r)}"
         "</ul>"
-    ) + _notas_html(r["notas"])
+    ) + notas_html(r["notas"])
 
-    return _banner("ok", "🔮", f"{r['producto']} — {r['fecha']}", cuerpo)
+    return banner("ok", "🔮", f"{r['producto']} — {r['fecha']}", cuerpo)
 
 
 # --------------------------------------------------------------------------- #
 # Predicción de rango
 # --------------------------------------------------------------------------- #
 def predecir_rango_ui(producto: str, fecha_inicio_str: str, dias: int):
-    try:
-        fecha_inicio = _parse_fecha(fecha_inicio_str)
-    except ErrorValidacion as e:
-        return None, _error("Fecha inválida", str(e)), None
-
-    db = SessionLocal()
-    try:
-        r = predecir_rango(db, producto, fecha_inicio, int(dias))
-    except (ProductoNoServido, HistorialInsuficiente) as e:
-        return None, _error("No se pudo predecir", str(e)), None
-    except Exception as e:
-        return None, _error("Error inesperado", str(e)), None
-    finally:
-        db.close()
+    r, error = _ejecutar(predecir_rango, producto, fecha_inicio_str, int(dias))
+    if error:
+        return None, error, None
 
     tabla = pd.DataFrame(r["predicciones"])[["fecha", "prediccion_galones"]]
     tabla["fecha"] = tabla["fecha"].astype(str)
@@ -182,13 +133,11 @@ def predecir_rango_ui(producto: str, fecha_inicio_str: str, dias: int):
         '<span class="unidad">galones en total</span></div>'
         '<ul class="msg-detalle">'
         f"<li><b>Promedio por día:</b> {total / len(tabla):,.0f} galones</li>"
-        f"<li><b>Precio considerado:</b> S/ {r['precio_referencia']:.2f} "
-        "(el último registrado)</li>"
-        f"<li><b>Ventas cargadas hasta:</b> {r['ultimo_dia_real']}</li>"
+        f"{_items_contexto(r)}"
         "</ul>"
-    ) + _notas_html(r["notas"])
+    ) + notas_html(r["notas"])
 
-    resumen = _banner(
+    resumen = banner(
         "ok",
         "📈",
         f"{r['producto']} — {r['dias']} días desde {r['fecha_inicio']}",
@@ -227,7 +176,7 @@ def fin_carga_xlsx():
 def cargar_xlsx_ui(archivos, progress=gr.Progress()):
     """Carga uno o varios reportes mensuales .xlsx en el historial del modelo."""
     if not archivos:
-        return _error(
+        return error_html(
             "No hay archivos seleccionados",
             "Elige al menos un archivo .xlsx del reporte de ventas.",
         )
@@ -288,7 +237,7 @@ def cargar_xlsx_ui(archivos, progress=gr.Progress()):
         titulo = f"Carga completada — {total} días-producto guardados en el historial"
 
     cuerpo = f'<ul class="msg-archivos">{"".join(lineas)}</ul>'
-    return _banner(tipo, icono, titulo, cuerpo)
+    return banner(tipo, icono, titulo, cuerpo)
 
 
 # --------------------------------------------------------------------------- #
@@ -313,7 +262,7 @@ def cargar_metricas_ui():
     tabla = pd.DataFrame(m["metricas"])[
         ["producto", "acierto_pct", "error_medio_galones", "mape", "mae"]
     ]
-    return _banner("info", "📊", "¿Qué tan bien predice el modelo?", cuerpo), tabla
+    return banner("info", "📊", "¿Qué tan bien predice el modelo?", cuerpo), tabla
 
 
 _FECHA_INICIAL = fecha_sugerida("REGULAR")
@@ -327,8 +276,10 @@ with gr.Blocks(title="Inicio") as demo:
         # ---------------- Predicción diaria ----------------
         with gr.Tab("Predicción diaria"):
             gr.Markdown(
-                "Estima cuántos galones se venderán en un día. La **fecha** viene "
-                "precargada con el día siguiente al último con ventas cargadas."
+                "Estima cuántos galones se venderán en un día. Solo se predice de "
+                "**hoy en adelante**; la **fecha** viene precargada con el día "
+                "siguiente al último con ventas cargadas (o con hoy, si ese día "
+                "ya pasó)."
             )
             with gr.Row():
                 p_producto = gr.Dropdown(PRODUCTOS, value="REGULAR", label="Producto")
@@ -350,10 +301,10 @@ with gr.Blocks(title="Inicio") as demo:
         # ---------------- Predicción de rango ----------------
         with gr.Tab("Predicción de rango"):
             gr.Markdown(
-                "Estima varios días seguidos. Como el reporte de ventas llega una vez "
-                f"al mes, la proyección alcanza hasta **{MAX_HORIZONTE_DIAS} días** "
-                "desde el último día con ventas cargadas; si pides más, se recorta "
-                "hasta ese límite."
+                "Estima varios días seguidos, de **hoy en adelante**. Como el reporte "
+                "de ventas llega una vez al mes, la proyección alcanza hasta "
+                f"**{MAX_HORIZONTE_DIAS} días** desde el último día con ventas "
+                "cargadas; si pides más, se recorta hasta ese límite."
             )
             with gr.Row():
                 r_producto = gr.Dropdown(PRODUCTOS, value="REGULAR", label="Producto")

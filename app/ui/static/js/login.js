@@ -1,8 +1,5 @@
-import gradio as gr
-
-
-LOGIN_JS = """
 async (username, password) => {
+    // Handler del botón "Iniciar sesión" (login.py). Gradio lo lee como string: debe ser una sola función.
     const error = (t) =>
         '<div class="msg msg-err"><div class="msg-titulo">⚠️ ' + t + '</div></div>';
     if (!username || !password) {
@@ -24,22 +21,3 @@ async (username, password) => {
         return error('No se pudo conectar con el servidor.');
     }
 }
-"""
-
-with gr.Blocks(title="Iniciar sesión") as demo:
-    gr.Markdown("## Iniciar sesión")
-
-    username = gr.Textbox(label="Usuario")
-    password = gr.Textbox(label="Contraseña", type="password")
-    login_error = gr.HTML()
-
-    boton = gr.Button("Iniciar sesión", variant="primary")
-
-    gr.Markdown("¿No tienes cuenta? [Regístrate aquí](/registro)")
-
-    boton.click(
-        fn=None,
-        inputs=[username, password],
-        outputs=login_error,
-        js=LOGIN_JS,
-    )
