@@ -1,19 +1,33 @@
-"""Construcción de las 17 features del modelo de demanda diaria.
+"""
+Construcción de las 17 features del modelo de demanda diaria, para UN producto y
+UN día.
 
-FUENTE DE VERDAD: los notebooks ``feature_engineering.ipynb`` (razones frente a
-``base_28``, internas, precio) y ``dataframe.ipynb`` (``construir_calendario``).
-La lógica se copió de ahí, no se reimplementó de memoria. El test
-``tests/test_equivalencia_features.py`` comprueba, a 1e-6, que estas features
-coinciden con las que el notebook exportó en ``df_features.parquet``; ese test es
-el que garantiza que la extracción fue fiel (el riesgo real es un ``shift`` o un
-``rolling`` mal copiado).
+FUENTE DE VERDAD
+Los notebooks
+    ``feature_engineering.ipynb`` (razones frente a ``base_28``, internas, precio) y
+    ``dataframe.ipynb`` (``construir_calendario``, hoy también en ``agregacion.py``;
+    aquí se replica día a día en ``_calendario``).
 
-Idea central: las features de historia son RAZONES contra ``base_28`` (la media
-de la ``cantidad`` de los 28 días anteriores), no niveles en galones. La
-predicción del modelo es esa razón y se reconstruye como
-``modelo.predict(features) * base_28`` (ver ``servicio.py``). Por eso, para
-predecir un día hacen falta al menos los 28 días anteriores de ventas reales; si
-no los hay, se levanta ``HistorialInsuficiente`` (que el router traduce a 422).
+ENTRADA
+Las cuatro columnas crudas diarias de :data:`COLUMNAS_HISTORIAL` (las de la tabla
+``historial_ventas``), más la temperatura máxima y el régimen de precios, que
+``servicio.py`` obtiene de ``clima.py`` y de ``config_servicio.json``.
+
+IDEA CENTRAL
+Las features de historia son RAZONES contra ``base_28``
+    (la media de la ``cantidad`` de los 28 días anteriores), no niveles en galones.
+
+El modelo predice esa razón y ``servicio.py`` la convierte a galones con
+``max(modelo.predict(features) * base_28, 0)``. Por eso, para predecir un día hacen
+falta al menos los 28 días anteriores; si no están, se levanta
+``HistorialInsuficiente``.
+
+Esos 28 días no tienen que ser todos ventas reales: si el último reporte cargado
+no llega hasta la víspera, ``servicio.py`` completa el hueco con días predichos
+(``_puentear_historial``) antes de llamar a este módulo.
+
+``HistorialInsuficiente`` se muestra al usuario como error: HTTP 422 en el router
+(``routers/prediccion.py``) y un mensaje en la interfaz (``ui/paginas/inicio.py``).
 """
 
 from __future__ import annotations

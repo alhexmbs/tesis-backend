@@ -1,7 +1,9 @@
 async (username, password) => {
   // Handler del botón "Iniciar sesión" (login.py). Gradio lo lee como string: debe ser una sola función.
+  // Gradio lo envuelve como `await (<este archivo>)(...args)`: NO poner `;` al final,
+  // o el navegador da SyntaxError y la página se queda en "Cargando…" para siempre.
   const error = (t) =>
-    '<div class="msg msg-err"><div class="msg-titulo">⚠️ ' + t + "</div></div>";
+    '<div class="msg msg-err"><div class="msg-titulo"><i class="bi bi-exclamation-triangle"></i> ' + t + "</div></div>";
   if (!username || !password) {
     return error("Ingresa usuario y contraseña.");
   }
@@ -20,4 +22,4 @@ async (username, password) => {
   } catch (e) {
     return error("No se pudo conectar con el servidor.");
   }
-};
+}

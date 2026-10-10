@@ -1,13 +1,14 @@
-"""Ingesta del reporte mensual de ventas (.xlsx) hacia ``historial_ventas``.
+"""
+Ingesta del reporte mensual de ventas (.xlsx) hacia la base de datos en 
+    historial_ventas
 
-Es la ÚNICA vía por la que entran datos al sistema: el negocio ya tiene su propio
-sistema transaccional, aquí solo se carga el reporte mensual que este exporta. No se
-registran ventas una a una.
 
 Cadena: ``.xlsx`` -> :func:`extraer_excel` (transacciones) -> :func:`limpiar_datos`
 (agregado diario x producto) -> las cuatro columnas crudas de ``historial_ventas``.
 Ese agregado diario es exactamente el que produjo ``dataframe.ipynb`` para entrenar
 el modelo, y ``tests/test_ingesta_xlsx.py`` lo comprueba contra ``df_diario.parquet``.
+
+
 
 Sobre el arrastre de precio: ``limpiar_datos`` deja ``precio_promedio`` y
 ``proporcion_transacciones_grandes`` en NA los días sin ninguna venta (no hubo un

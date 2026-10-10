@@ -3,21 +3,99 @@
 Las clases (`msg`, `msg-ok`, `cargando`, …) están en `static/estilos.css`.
 """
 
+import re
+from datetime import date
 from pathlib import Path
+
+import gradio as gr
 
 STATIC_DIR = Path(__file__).parent / "static"
 
 # Hoja de estilos compartida por las tres apps montadas (login, registro, inicio).
 CSS_PATH = STATIC_DIR / "estilos.css"
 
-RELOJ_HTML = '<div class="reloj">🕒 <span id="reloj-inicio"></span></div>'
+# Librerías de terceros copiadas en `static/vendor` (sin depender de internet).
+VENDOR_DIR = STATIC_DIR / "vendor"
 
-CERRAR_SESION_HTML = (
-    '<div class="fila-cerrar-sesion">'
+# Íconos de Bootstrap (`<i class="bi bi-...">`): se inyecta en el <head> de las tres
+# páginas. Solo funcionan dentro de gr.HTML: pestañas, labels y botones son texto.
+HEAD_ICONOS = (
+    '<link rel="stylesheet" href="/vendor/bootstrap-icons/bootstrap-icons.min.css">'
+)
+
+# Tema compartido. La fuente por defecto de Gradio (Source Sans Pro) viene con el
+# peso 600 recortado a unas pocas letras: en títulos, etiquetas y botones las que
+# faltan (p. ej. la "A" o la "B") salen con otra fuente y se ven más chicas. Con
+# fuentes del sistema (texto plano, sin archivo .woff2) todas las letras existen.
+# `.set(...)`: las etiquetas de los campos ("Producto") van como texto simple, sin
+# la pastilla azul que Soft les pone de fondo.
+TEMA = gr.themes.Soft(
+    primary_hue="blue",
+    neutral_hue="slate",
+    radius_size="lg",
+    font=["Segoe UI", "system-ui", "-apple-system", "Roboto", "sans-serif"],
+    font_mono=["Consolas", "ui-monospace", "monospace"],
+).set(
+    block_title_background_fill="transparent",
+    block_title_padding="0",
+    block_title_text_color="*neutral_700",
+    block_title_text_weight="600",
+    block_label_background_fill="transparent",
+    block_label_text_color="*neutral_700",
+)
+
+# Encabezado de /inicio: nombre a la izquierda; fecha de hoy (la pone encabezado.js)
+# y "Cerrar sesión" a la derecha.
+ENCABEZADO_HTML = (
+    '<div class="encabezado">'
+    "<div>"
+    '<div class="encabezado-titulo">'
+    '<i class="bi bi-fuel-pump"></i> BENZIN AI</div>'
+    '<div class="encabezado-sub">Predicción de demanda de combustible</div>'
+    "</div>"
+    '<div class="encabezado-derecha">'
+    '<span id="fecha-hoy" class="encabezado-fecha"></span>'
     '<a href="/inicio/logout" id="cerrar-sesion" class="boton-cerrar-sesion">'
-    "⏻ Cerrar sesión</a>"
+    '<i class="bi bi-box-arrow-right"></i> Cerrar sesión</a>'
+    "</div>"
     "</div>"
 )
+
+MESES = [
+    "enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
+    "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+]  # fmt: skip
+
+# Fecha escrita como 2026-08-31 dentro de un texto.
+FECHA_ISO = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def fecha_larga(d: date | str) -> str:
+    """2026-08-31 → "31 de agosto de 2026" (sin depender del idioma del sistema)."""
+    if isinstance(d, str):
+        d = date.fromisoformat(d)
+    return f"{d.day} de {MESES[d.month - 1]} de {d.year}"
+
+
+def cabecera_tarjeta(subtitulo: str) -> str:
+    """Logo + nombre + subtítulo, arriba de las tarjetas de login y registro."""
+    return (
+        '<div class="tarjeta-cabecera">'
+        '<div class="tarjeta-logo"><i class="bi bi-fuel-pump"></i></div>'
+        '<div class="tarjeta-titulo">BENZIN AI</div>'
+        f'<div class="tarjeta-sub">{subtitulo}</div>'
+        "</div>"
+    )
+
+
+def enlace_tarjeta(texto: str, enlace: str, href: str) -> str:
+    """Pie de la tarjeta con un enlace que abre en la MISMA pestaña.
+
+    Va en gr.HTML y no en gr.Markdown porque Gradio abre en pestaña nueva todos los
+    enlaces de Markdown.
+    """
+    return f'<p class="tarjeta-pie">{texto} <a href="{href}">{enlace}</a></p>'
+
 
 SPINNER_HTML = (
     '<div class="cargando">'
@@ -40,10 +118,14 @@ def leer_js(nombre: str) -> str:
 # Mensajes en bloque de color
 # --------------------------------------------------------------------------- #
 def banner(tipo: str, icono: str, titulo: str, cuerpo: str = "") -> str:
-    """Bloque de color para los resultados. `tipo` es ok | err | info."""
+    """Bloque de color para los resultados.
+
+    `tipo` es ok | err | info; `icono` es el nombre de un ícono de Bootstrap sin el
+    prefijo "bi-" (p. ej. "check-circle"): https://icons.getbootstrap.com
+    """
     return (
         f'<div class="msg msg-{tipo}">'
-        f'<div class="msg-titulo">{icono} {titulo}</div>'
+        f'<div class="msg-titulo"><i class="bi bi-{icono}"></i> {titulo}</div>'
         f"{cuerpo}"
         "</div>"
     )
@@ -51,12 +133,19 @@ def banner(tipo: str, icono: str, titulo: str, cuerpo: str = "") -> str:
 
 def error_html(titulo: str, detalle: str = "") -> str:
     cuerpo = f'<div class="msg-cuerpo">{detalle}</div>' if detalle else ""
-    return banner("err", "⚠️", titulo, cuerpo)
+    return banner("err", "exclamation-triangle", titulo, cuerpo)
 
 
 def notas_html(notas: list[str]) -> str:
-    """Notas del servicio en lenguaje llano, para pegar al final del resumen."""
+    """Notas del servicio en lenguaje llano, para pegar al final del resumen.
+
+    El servicio escribe las fechas como 2026-08-31 (también las usa la API); aquí se
+    muestran como "31 de agosto de 2026".
+    """
     if not notas:
         return ""
-    items = "".join(f"<li>{n}</li>" for n in notas)
+    items = ""
+    for nota in notas:
+        nota = FECHA_ISO.sub(lambda m: fecha_larga(m.group()), nota)
+        items += f"<li>{nota}</li>"
     return f'<ul class="msg-notas">{items}</ul>'

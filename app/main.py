@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 import gradio as gr
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.database import Base, engine
 
@@ -13,7 +14,7 @@ from app.routers import auth as auth_router
 from app.routers import prediccion as prediccion_router
 from app.services.prediccion.servicio import cargar_artefactos
 from app.ui.auth import autenticar
-from app.ui.componentes import CSS_PATH, leer_js
+from app.ui.componentes import CSS_PATH, HEAD_ICONOS, TEMA, VENDOR_DIR, leer_js
 from app.ui.paginas.inicio import demo as inicio_demo
 from app.ui.paginas.login import demo as login_demo
 from app.ui.paginas.registro import demo as registro_demo
@@ -46,17 +47,32 @@ app.add_middleware(
 app.include_router(auth_router.router)
 app.include_router(prediccion_router.router)
 
+# Copias locales de Bootstrap Icons y Flatpickr: la UI no depende de internet.
+app.mount("/vendor", StaticFiles(directory=VENDOR_DIR), name="vendor")
+
 # Fuerza modo claro al cargar, sin importar el tema del sistema/navegador.
 FORCE_LIGHT_JS = leer_js("forzar_claro.js")
 
-# En Gradio 6 el CSS ya no se pasa al constructor de Blocks (solo a launch(), que aquí
-# nunca se llama): en apps montadas va en mount_gradio_app.
+# En Gradio 6 el CSS y el tema ya no se pasan al constructor de Blocks (solo a
+# launch(), que aquí nunca se llama): en apps montadas van en mount_gradio_app.
 # "/registro" y "/login" quedan fuera de auth: son las páginas públicas de entrada
 app = gr.mount_gradio_app(
-    app, registro_demo, path="/registro", js=FORCE_LIGHT_JS, css_paths=[CSS_PATH]
+    app,
+    registro_demo,
+    path="/registro",
+    js=FORCE_LIGHT_JS,
+    css_paths=[CSS_PATH],
+    theme=TEMA,
+    head=HEAD_ICONOS,
 )
 app = gr.mount_gradio_app(
-    app, login_demo, path="/login", js=FORCE_LIGHT_JS, css_paths=[CSS_PATH]
+    app,
+    login_demo,
+    path="/login",
+    js=FORCE_LIGHT_JS,
+    css_paths=[CSS_PATH],
+    theme=TEMA,
+    head=HEAD_ICONOS,
 )
 
 # "/inicio" es un único Blocks con pestañas (predicción diaria, rango, carga de ventas,
@@ -68,6 +84,8 @@ app = gr.mount_gradio_app(
     auth=autenticar,
     js=FORCE_LIGHT_JS,
     css_paths=[CSS_PATH],
+    theme=TEMA,
+    head=HEAD_ICONOS,
 )
 
 

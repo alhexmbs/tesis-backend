@@ -15,12 +15,13 @@ from app.services.prediccion.servicio import (
     predecir_rango,
     ultimo_dia_historial,
 )
+from app.ui.calendario import calendario
 from app.ui.componentes import (
-    CERRAR_SESION_HTML,
-    RELOJ_HTML,
+    ENCABEZADO_HTML,
     SPINNER_HTML,
     banner,
     error_html,
+    fecha_larga,
     leer_js,
     notas_html,
 )
@@ -28,30 +29,118 @@ from app.utils.validaciones import ErrorValidacion, validar_fecha
 
 PRODUCTOS = ["REGULAR", "PREMIUM", "GLP"]
 
-RELOJ_JS_ON_LOAD = leer_js("reloj.js")
-CERRAR_SESION_JS_ON_LOAD = leer_js("cerrar_sesion.js")
+ENCABEZADO_JS_ON_LOAD = leer_js("encabezado.js")
 
-# Filtro de tecleo del navegador: en los campos de fecha solo entran dígitos y
-# guiones, con el largo justo de AAAA-MM-DD. El formato lo verifica `validar_fecha`
-# en el servidor; esto solo evita que el usuario llegue a escribir letras.
-SOLO_FECHA_JS = "(v) => (v || '').replace(/[^0-9-]/g, '').slice(0, 10)"
+# Botón "Cargar ventas" dentro de un gr.HTML (aviso o error). Un clic en él dispara
+# el evento propio `ir_carga`, que en Python cambia a la pestaña de carga. Gradio
+# solo crea `.ir_carga(...)` si el nombre aparece entre comillas en este JS.
+IR_CARGA_JS = (
+    "element.addEventListener('click', (e) => {"
+    " if (e.target.closest('.boton-ir-carga')) trigger('ir_carga'); });"
+)
+BOTON_IR_CARGA = (
+    '<button type="button" class="boton-ir-carga">'
+    '<i class="bi bi-upload"></i> Cargar ventas</button>'
+)
+
+
+def _ultimo_dia(producto: str) -> date | None:
+    """Último día con ventas cargadas del producto (None si no hay o falla la BD)."""
+    try:
+        db = SessionLocal()
+        try:
+            return ultimo_dia_historial(db, producto)
+        finally:
+            db.close()
+    except Exception:
+        return None
+
+
+def _aviso_sin_ventas(producto: str, ultimo: date | None, titulo: str) -> str:
+    """Aviso en lenguaje llano + botón que lleva a la pestaña de carga."""
+    if ultimo is None:
+        detalle = f"Todavía no hay ventas cargadas de {producto}."
+    else:
+        detalle = f"El último registro de {producto} es del {fecha_larga(ultimo)}."
+    cuerpo = (
+        f'<div class="msg-cuerpo">{detalle} Carga el reporte más reciente para '
+        f"poder predecir.</div>{BOTON_IR_CARGA}"
+    )
+    return banner("info", "exclamation-circle", titulo, cuerpo)
+
+
+def limites_fecha(producto: str):
+    """Rango elegible del calendario para un producto.
+
+    - mínimo: hoy (hacia atrás no se pronostica).
+    - máximo: último día con ventas + MAX_HORIZONTE_DIAS (más lejos el modelo no
+      proyecta).
+    - fecha propuesta: el día siguiente al último con ventas, o hoy si ese día ya
+      pasó.
+
+    Si el máximo quedó antes de hoy, el rango está vacío: se muestra el aviso de
+    ventas desactualizadas y el calendario queda con todos los días bloqueados.
+
+    Devuelve las actualizaciones de (calendario, aviso, botón Predecir).
+    """
+    hoy = date.today()
+    ultimo = _ultimo_dia(producto)
+    maximo = ultimo + timedelta(days=MAX_HORIZONTE_DIAS) if ultimo else None
+
+    if maximo is None or maximo < hoy:
+        aviso = _aviso_sin_ventas(producto, ultimo, "Las ventas están desactualizadas")
+        # mínimo > máximo: Flatpickr deshabilita todos los días.
+        ayer = hoy - timedelta(days=1)
+        return (
+            gr.update(value=None, minimo=hoy.isoformat(), maximo=ayer.isoformat()),
+            gr.update(value=aviso),
+            gr.update(interactive=False),
+        )
+
+    sugerida = max(ultimo + timedelta(days=1), hoy)
+    return (
+        gr.update(
+            value=sugerida.isoformat(),
+            minimo=hoy.isoformat(),
+            maximo=maximo.isoformat(),
+        ),
+        gr.update(value=""),
+        gr.update(interactive=True),
+    )
+
+
+def ir_a_carga():
+    return gr.Tabs(selected="carga")
+
+
+def bloquear_boton(texto: str):
+    """Mientras predice: botón deshabilitado, así no se envían clics repetidos."""
+    return gr.update(value=texto, interactive=False)
 
 
 def _ejecutar(fn, producto: str, fecha_str: str, *args):
     """Valida la fecha (AAAA-MM-DD estricto), abre la sesión y corre `fn`.
 
     Devuelve `(resultado, None)` o `(None, html_error)`: los dos predictores
-    comparten los mismos errores esperables y el mismo manejo de la sesión.
+    comparten los mismos errores esperables y el mismo manejo de la sesión. El
+    calendario ya impide elegir fechas inválidas; esto es la red de seguridad.
     """
     try:
         fecha = validar_fecha(fecha_str)
-    except ErrorValidacion as e:
-        return None, error_html("Fecha inválida", str(e))
+    except ErrorValidacion:
+        return None, error_html("Elige una fecha en el calendario")
 
     db = SessionLocal()
     try:
         return fn(db, producto, fecha, *args), None
-    except (ProductoNoServido, HistorialInsuficiente, FechaEnPasado) as e:
+    except HistorialInsuficiente:
+        # El mensaje del servicio es técnico (lo usa la API): aquí va en llano.
+        return None, _aviso_sin_ventas(
+            producto,
+            _ultimo_dia(producto),
+            "No hay ventas recientes para predecir esta fecha",
+        )
+    except (ProductoNoServido, FechaEnPasado) as e:
         return None, error_html("No se pudo predecir", str(e))
     except Exception as e:
         return None, error_html("Error inesperado", str(e))
@@ -64,35 +153,13 @@ def _items_contexto(r: dict) -> str:
     return (
         f"<li><b>Precio considerado:</b> S/ {r['precio_referencia']:.2f} "
         "(el último registrado)</li>"
-        f"<li><b>Ventas cargadas hasta:</b> {r['ultimo_dia_real']}</li>"
+        f"<li><b>Ventas cargadas hasta:</b> {fecha_larga(r['ultimo_dia_real'])}</li>"
     )
 
 
 # --------------------------------------------------------------------------- #
 # Predicción diaria
 # --------------------------------------------------------------------------- #
-def fecha_sugerida(producto: str) -> str:
-    """Día siguiente al final del historial, nunca anterior a hoy.
-
-    El historial se alimenta con el reporte mensual, así que casi siempre va por
-    detrás del calendario: el día siguiente al último dato cargado suele ser una
-    fecha ya pasada, y hacia atrás no se pronostica. Por eso se propone el más
-    reciente de los dos (último + 1 u hoy). Si el historial quedó muy atrás, el
-    servicio responderá pidiendo cargar el reporte más reciente.
-    """
-    try:
-        db = SessionLocal()
-        try:
-            ultimo = ultimo_dia_historial(db, producto)
-        finally:
-            db.close()
-    except Exception:
-        ultimo = None
-    hoy = date.today()
-    siguiente = (ultimo + timedelta(days=1)) if ultimo is not None else hoy
-    return max(siguiente, hoy).isoformat()
-
-
 def predecir_ui(producto: str, fecha_str: str):
     r, error = _ejecutar(predecir_dia, producto, fecha_str)
     if error:
@@ -112,12 +179,30 @@ def predecir_ui(producto: str, fecha_str: str):
         "</ul>"
     ) + notas_html(r["notas"])
 
-    return banner("ok", "🔮", f"{r['producto']} — {r['fecha']}", cuerpo)
+    titulo = f"{r['producto']} — {fecha_larga(r['fecha'])}"
+    return banner("ok", "graph-up", titulo, cuerpo)
 
 
 # --------------------------------------------------------------------------- #
 # Predicción de rango
 # --------------------------------------------------------------------------- #
+def ajustar_rango(producto: str, fecha_inicio: str | None, dias: int):
+    """Al cambiar la fecha de inicio: activa "Predecir rango" y acota el slider.
+
+    El slider no deja pedir días más allá del máximo del calendario (último día
+    con ventas + MAX_HORIZONTE_DIAS).
+    """
+    ultimo = _ultimo_dia(producto)
+    if not fecha_inicio or ultimo is None:
+        return gr.update(interactive=False), gr.update()
+    maximo = ultimo + timedelta(days=MAX_HORIZONTE_DIAS)
+    dias_max = max((maximo - date.fromisoformat(fecha_inicio)).days + 1, 1)
+    return (
+        gr.update(interactive=True),
+        gr.update(maximum=dias_max, value=min(int(dias), dias_max)),
+    )
+
+
 def predecir_rango_ui(producto: str, fecha_inicio_str: str, dias: int):
     r, error = _ejecutar(predecir_rango, producto, fecha_inicio_str, int(dias))
     if error:
@@ -139,12 +224,14 @@ def predecir_rango_ui(producto: str, fecha_inicio_str: str, dias: int):
 
     resumen = banner(
         "ok",
-        "📈",
-        f"{r['producto']} — {r['dias']} días desde {r['fecha_inicio']}",
+        "calendar-range",
+        f"{r['producto']} — {r['dias']} días desde el {fecha_larga(r['fecha_inicio'])}",
         cuerpo,
     )
 
-    return tabla, resumen, tabla
+    # El gráfico necesita la fecha ISO para ordenar el eje; la tabla la muestra larga.
+    detalle = tabla.assign(fecha=tabla["fecha"].map(fecha_larga))
+    return tabla, resumen, detalle
 
 
 # --------------------------------------------------------------------------- #
@@ -231,13 +318,13 @@ def cargar_xlsx_ui(archivos, progress=gr.Progress()):
 
     correctos = len(lineas) - con_error
     if con_error and not correctos:
-        tipo, icono = "err", "⚠️"
+        tipo, icono = "err", "exclamation-triangle"
         titulo = "No se pudo cargar ningún archivo"
     elif con_error:
-        tipo, icono = "info", "⚠️"
+        tipo, icono = "info", "exclamation-circle"
         titulo = f"{total} días-producto guardados · {con_error} archivo(s) con error"
     else:
-        tipo, icono = "ok", "✅"
+        tipo, icono = "ok", "check-circle"
         titulo = f"Carga completada — {total} días-producto guardados en el historial"
 
     cuerpo = f'<ul class="msg-archivos">{"".join(lineas)}</ul>'
@@ -266,78 +353,122 @@ def cargar_metricas_ui():
     tabla = pd.DataFrame(m["metricas"])[
         ["producto", "acierto_pct", "error_medio_galones", "mape", "mae"]
     ]
-    return banner("info", "📊", "¿Qué tan bien predice el modelo?", cuerpo), tabla
-
-
-_FECHA_INICIAL = fecha_sugerida("REGULAR")
+    titulo = "¿Qué tan bien predice el modelo?"
+    return banner("info", "bar-chart", titulo, cuerpo), tabla
 
 
 with gr.Blocks(title="Inicio") as demo:
-    gr.Markdown("# BENZIN AI — Predicción de demanda de combustible")
-    gr.HTML(RELOJ_HTML, js_on_load=RELOJ_JS_ON_LOAD)
+    gr.HTML(ENCABEZADO_HTML, js_on_load=ENCABEZADO_JS_ON_LOAD)
 
-    with gr.Tabs():
+    with gr.Tabs() as pestanas:
         # ---------------- Predicción diaria ----------------
-        with gr.Tab("Predicción diaria"):
+        with gr.Tab("Predicción diaria", id="diaria"):
+            p_aviso = gr.HTML(js_on_load=IR_CARGA_JS)
             gr.Markdown(
-                "Estima cuántos galones se venderán en un día. Solo se predice de "
-                "**hoy en adelante**; la **fecha** viene precargada con el día "
-                "siguiente al último con ventas cargadas (o con hoy, si ese día "
-                "ya pasó)."
+                "Elige un producto y una fecha para estimar los galones que se "
+                "venderán."
             )
-            with gr.Row():
+            gr.Markdown(
+                f"Se puede elegir desde hoy hasta {MAX_HORIZONTE_DIAS} días después "
+                "del último día con ventas cargadas. La fecha propuesta es el día "
+                "siguiente a ese registro.",
+                elem_classes="ayuda",
+            )
+            with gr.Row(equal_height=True):
                 p_producto = gr.Dropdown(PRODUCTOS, value="REGULAR", label="Producto")
-                p_fecha = gr.Textbox(
-                    value=_FECHA_INICIAL, label="Fecha (AAAA-MM-DD)", max_length=10
-                )
-            p_boton = gr.Button("Predecir", variant="primary")
-            p_resultado = gr.HTML()
+                p_fecha = calendario("Fecha")
+            p_boton = gr.Button(
+                "Predecir", variant="primary", size="lg", interactive=False
+            )
+            p_resultado = gr.HTML(js_on_load=IR_CARGA_JS)
 
-            p_fecha.input(fn=None, inputs=p_fecha, outputs=p_fecha, js=SOLO_FECHA_JS)
-            p_producto.change(fecha_sugerida, inputs=p_producto, outputs=p_fecha)
-            p_boton.click(
-                predecir_ui,
-                inputs=[p_producto, p_fecha],
-                outputs=p_resultado,
-                show_progress="full",
+            p_producto.change(
+                limites_fecha, inputs=p_producto, outputs=[p_fecha, p_aviso, p_boton]
+            )
+            # Sin fecha elegida no se puede predecir.
+            p_fecha.change(
+                lambda f: gr.update(interactive=bool(f)),
+                inputs=p_fecha,
+                outputs=p_boton,
+                show_progress="hidden",
+            )
+            (
+                p_boton.click(
+                    lambda: bloquear_boton("Prediciendo…"),
+                    outputs=p_boton,
+                    show_progress="hidden",
+                )
+                .then(
+                    predecir_ui,
+                    inputs=[p_producto, p_fecha],
+                    outputs=p_resultado,
+                    show_progress="full",
+                )
+                .then(
+                    lambda: gr.update(value="Predecir", interactive=True),
+                    outputs=p_boton,
+                    show_progress="hidden",
+                )
             )
 
         # ---------------- Predicción de rango ----------------
-        with gr.Tab("Predicción de rango"):
+        with gr.Tab("Predicción de rango", id="rango"):
+            r_aviso = gr.HTML(js_on_load=IR_CARGA_JS)
             gr.Markdown(
-                "Estima varios días seguidos, de **hoy en adelante**. Como el reporte "
-                "de ventas llega una vez al mes, la proyección alcanza hasta "
-                f"**{MAX_HORIZONTE_DIAS} días** desde el último día con ventas "
-                "cargadas; si pides más, se recorta hasta ese límite."
+                "Elige un producto, una fecha de inicio y cuántos días quieres "
+                "estimar."
             )
-            with gr.Row():
+            gr.Markdown(
+                "Como el reporte de ventas llega una vez al mes, la proyección "
+                f"alcanza hasta {MAX_HORIZONTE_DIAS} días después del último día "
+                "con ventas cargadas.",
+                elem_classes="ayuda",
+            )
+            with gr.Row(equal_height=True):
                 r_producto = gr.Dropdown(PRODUCTOS, value="REGULAR", label="Producto")
-                r_fecha = gr.Textbox(
-                    value=_FECHA_INICIAL,
-                    label="Fecha inicio (AAAA-MM-DD)",
-                    max_length=10,
-                )
+                r_fecha = calendario("Fecha de inicio")
                 r_dias = gr.Slider(
                     1, MAX_HORIZONTE_DIAS, value=7, step=1, label="Días a predecir"
                 )
-            r_boton = gr.Button("Predecir rango", variant="primary")
-            r_aviso = gr.HTML()
+            r_boton = gr.Button(
+                "Predecir rango", variant="primary", size="lg", interactive=False
+            )
+            r_resumen = gr.HTML(js_on_load=IR_CARGA_JS)
             r_grafico = gr.LinePlot(
                 x="fecha", y="galones", label="Predicción (galones/día)"
             )
             r_tabla = gr.Dataframe(label="Detalle")
 
-            r_fecha.input(fn=None, inputs=r_fecha, outputs=r_fecha, js=SOLO_FECHA_JS)
-            r_producto.change(fecha_sugerida, inputs=r_producto, outputs=r_fecha)
-            r_boton.click(
-                predecir_rango_ui,
+            r_producto.change(
+                limites_fecha, inputs=r_producto, outputs=[r_fecha, r_aviso, r_boton]
+            )
+            r_fecha.change(
+                ajustar_rango,
                 inputs=[r_producto, r_fecha, r_dias],
-                outputs=[r_grafico, r_aviso, r_tabla],
-                show_progress="full",
+                outputs=[r_boton, r_dias],
+                show_progress="hidden",
+            )
+            (
+                r_boton.click(
+                    lambda: bloquear_boton("Prediciendo…"),
+                    outputs=r_boton,
+                    show_progress="hidden",
+                )
+                .then(
+                    predecir_rango_ui,
+                    inputs=[r_producto, r_fecha, r_dias],
+                    outputs=[r_grafico, r_resumen, r_tabla],
+                    show_progress="full",
+                )
+                .then(
+                    lambda: gr.update(value="Predecir rango", interactive=True),
+                    outputs=r_boton,
+                    show_progress="hidden",
+                )
             )
 
         # ---------------- Carga del reporte mensual ----------------
-        with gr.Tab("Cargar ventas mensuales"):
+        with gr.Tab("Cargar ventas mensuales", id="carga"):
             gr.Markdown(
                 "Sube el **reporte mensual de ventas** (`.xlsx`) que exporta el sistema "
                 "del grifo. Se agregan las transacciones a nivel día × producto y se "
@@ -351,12 +482,15 @@ with gr.Blocks(title="Inicio") as demo:
                 file_count="multiple",
                 type="filepath",
             )
-            v_xlsx_boton = gr.Button("Cargar al historial", variant="primary")
+            v_xlsx_boton = gr.Button(
+                "Cargar al historial", variant="primary", size="lg"
+            )
             v_spinner = gr.HTML(SPINNER_HTML, visible=False)
             v_xlsx_resultado = gr.HTML()
 
-            # Tres pasos encadenados: bloquear el panel y encender el spinner →
-            # ingesta → vaciar el selector y reactivar. El último paso no escribe en
+            # Pasos encadenados: bloquear el panel y encender el spinner → ingesta →
+            # vaciar el selector y reactivar → recalcular los calendarios (con ventas
+            # nuevas cambia el máximo). Los últimos pasos no escriben en
             # v_xlsx_resultado, así el mensaje sobrevive al refresco del panel.
             (
                 v_xlsx_boton.click(
@@ -375,14 +509,34 @@ with gr.Blocks(title="Inicio") as demo:
                     outputs=[v_xlsx_boton, v_xlsx, v_spinner],
                     show_progress="hidden",
                 )
+                .then(
+                    limites_fecha,
+                    inputs=p_producto,
+                    outputs=[p_fecha, p_aviso, p_boton],
+                    show_progress="hidden",
+                )
+                .then(
+                    limites_fecha,
+                    inputs=r_producto,
+                    outputs=[r_fecha, r_aviso, r_boton],
+                    show_progress="hidden",
+                )
             )
 
         # ---------------- Métricas ----------------
-        with gr.Tab("Métricas del modelo"):
+        with gr.Tab("Métricas del modelo", id="metricas"):
             m_texto = gr.HTML()
             m_tabla = gr.Dataframe(label="Detalle por producto")
             m_boton = gr.Button("Actualizar métricas")
             m_boton.click(cargar_metricas_ui, outputs=[m_texto, m_tabla])
-            demo.load(cargar_metricas_ui, outputs=[m_texto, m_tabla])
 
-    gr.HTML(CERRAR_SESION_HTML, js_on_load=CERRAR_SESION_JS_ON_LOAD)
+    # Al abrir la página: métricas y límites de los dos calendarios (calculados en
+    # cada visita, no al arrancar el servidor, para que "hoy" sea siempre hoy).
+    demo.load(cargar_metricas_ui, outputs=[m_texto, m_tabla])
+    demo.load(limites_fecha, inputs=p_producto, outputs=[p_fecha, p_aviso, p_boton])
+    demo.load(limites_fecha, inputs=r_producto, outputs=[r_fecha, r_aviso, r_boton])
+
+    # Botón "Cargar ventas" de los avisos y errores → pestaña de carga, sin salir de
+    # la página.
+    for html in (p_aviso, p_resultado, r_aviso, r_resumen):
+        html.ir_carga(ir_a_carga, outputs=pestanas)

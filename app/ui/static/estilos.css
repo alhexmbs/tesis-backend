@@ -144,42 +144,225 @@
 }
 
 
-/* ------------------------------------------------------------------ Reloj */
-.reloj {
-  font-size: 1.05rem;
+/* ------------------------------------------------ Encabezado de /inicio */
+/* Fondo blanco y texto oscuro: máximo contraste, sin degradados. */
+.encabezado {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 22px;
+  border-radius: 14px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  color: #0f172a;
+}
+
+.encabezado-titulo {
+  font-size: 1.45rem;
+  font-weight: 700;
+}
+
+.encabezado-titulo .bi {
+  color: #1d4ed8;
+}
+
+.encabezado-sub {
+  font-size: 0.95rem;
+  color: #475569;
+}
+
+.encabezado-derecha {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+}
+
+.encabezado-fecha {
+  color: #475569;
+}
+
+/* Cerrar sesión: botón discreto (gris) para no competir con "Predecir". */
+a.boton-cerrar-sesion {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #334155 !important;
+  font-weight: 600;
+  text-decoration: none !important;
+  cursor: pointer;
+}
+
+a.boton-cerrar-sesion:hover {
+  background: #f1f5f9;
+}
+
+
+/* ------------------------------------------------------- Texto de ayuda */
+.ayuda,
+.ayuda p {
+  font-size: 0.88rem !important;
+  color: #64748b !important;
+  margin-top: -6px;
+}
+
+
+/* ----------------------------------------------------- Campo de fecha */
+/* El calendario es un gr.HTML: se imita el aspecto de los demás campos con las
+ * variables CSS del tema de Gradio (--input-*, --block-*). */
+.campo-fecha {
+  height: 100%;
+  padding: var(--block-padding);
+  border: 1px solid var(--block-border-color);
+  border-radius: var(--block-radius);
+  background: var(--block-background-fill);
+}
+
+.campo-etiqueta {
+  display: block;
+  margin-bottom: 8px;
+  font-size: var(--block-title-text-size);
   font-weight: 600;
   color: #334155;
 }
 
-
-
-/* -------------------------------------------------------- Cerrar sesión */
-.fila-cerrar-sesion {
+.campo-fecha-fila {
+  position: relative;
   display: flex;
-  justify-content: flex-end;
-  margin-top: 22px;
+  gap: 8px;
+}
+
+.campo-fecha-icono {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #64748b;
+  pointer-events: none;
+}
+
+input.campo-fecha-input {
+  flex: 1;
+  min-width: 0;
+  padding: var(--input-padding);
+  padding-left: 36px;
+  border: 1px solid var(--input-border-color);
+  border-radius: var(--input-radius);
+  background: var(--input-background-fill);
+  font: inherit;
+  color: #0f172a;
+  cursor: pointer;
+}
+
+.boton-manana {
+  padding: 0 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: var(--input-radius);
+  background: #ffffff;
+  color: #1d4ed8;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.boton-manana:hover:not(:disabled) {
+  background: #eff6ff;
+}
+
+.boton-manana:disabled {
+  color: #94a3b8;
+  cursor: not-allowed;
+}
+
+/* Flatpickr: nombre del mes con mayúscula inicial ("Septiembre"). */
+.flatpickr-current-month,
+.flatpickr-monthDropdown-months {
+  text-transform: capitalize;
 }
 
 
-a.boton-cerrar-sesion {
+/* ---------------------------------------- Botón "Cargar ventas" en avisos */
+.boton-ir-carga {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 10px 22px;
-  border-radius: 10px;
-  border: 1px solid #991b1b;
-  background: #b91c1c;
-  color: #ffffff !important;
-  font-weight: 700;
-  text-decoration: none !important;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 8px;
+  background: #1d4ed8;
+  color: #ffffff;
+  font-weight: 600;
   cursor: pointer;
-  transition: background 0.15s ease, transform 0.05s ease;
 }
 
-a.boton-cerrar-sesion:hover {
-  background: #991b1b;
+.boton-ir-carga:hover {
+  background: #1e40af;
 }
 
-a.boton-cerrar-sesion:active {
-  transform: translateY(1px);
+.boton-ir-carga .bi {
+  color: #ffffff
+}
+
+
+/* ------------------------------------------- Tarjeta de login y registro */
+/* Recuadro angosto y centrado en vez de campos a lo ancho de la pantalla. */
+.tarjeta {
+  width: 100%;
+  max-width: 440px;
+  margin: 40px auto !important;
+  padding: 28px 30px !important;
+  border-radius: 18px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+}
+
+.tarjeta-ancha {
+  max-width: 560px;
+}
+
+.tarjeta-cabecera {
+  text-align: center;
+  margin-bottom: 6px;
+}
+
+.tarjeta-logo {
+  font-size: 2.4rem;
+  line-height: 1;
+  color: #1d4ed8;
+}
+
+.tarjeta-titulo {
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin-top: 6px;
+}
+
+.tarjeta-sub {
+  color: #64748b;
+}
+
+.tarjeta-pie {
+  text-align: center;
+  margin: 4px 0 0 0;
+}
+
+.tarjeta-pie a {
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+
+/* ------------------------------------------ Navegación entre páginas */
+/* Login ↔ registro ↔ inicio son páginas distintas: con esto el navegador
+ * (Chrome/Edge) funde una en la otra en vez de parpadear en blanco. */
+@view-transition {
+  navigation: auto;
 }

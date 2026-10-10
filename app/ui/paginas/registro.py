@@ -2,7 +2,7 @@ import gradio as gr
 
 from app.database import SessionLocal
 from app.services.auth import register_service
-from app.ui.componentes import banner
+from app.ui.componentes import banner, cabecera_tarjeta, enlace_tarjeta
 from app.utils.validaciones import LARGO_CELULAR, LARGO_DNI, ErrorValidacion
 
 SIN_ERROR = gr.update(value="", visible=False)
@@ -18,7 +18,7 @@ SOLO_DIGITOS_JS = r"(v) => (v || '').replace(/\D/g, '').slice(0, %d)"
 
 
 def error_en(mensaje):
-    return gr.update(value=banner("err", "⚠️", mensaje), visible=True)
+    return gr.update(value=banner("err", "exclamation-triangle", mensaje), visible=True)
 
 
 def _salida(campo: str | None = None, mensaje: str = "", resultado: str = ""):
@@ -53,37 +53,42 @@ def registrar(nombres, apellidos, dni, nro_celular, username, password):
 
     return _salida(
         resultado=banner(
-            "ok", "✅", "Usuario registrado correctamente. Ya puedes iniciar sesión."
+            "ok",
+            "check-circle",
+            "Usuario registrado correctamente. Ya puedes iniciar sesión.",
         )
     )
 
 
 with gr.Blocks(title="Registro de usuario") as demo:
-    gr.Markdown("## Registro de usuario")
-    gr.Markdown("¿Ya tienes una cuenta? [Inicia sesión aquí](/login)")
+    with gr.Column(elem_classes=["tarjeta", "tarjeta-ancha"]):
+        gr.HTML(cabecera_tarjeta("Crea tu cuenta"))
 
-    nombres = gr.Textbox(label="Nombres", max_length=60)
-    nombre_error = gr.HTML(visible=False)
+        nombres = gr.Textbox(label="Nombres", max_length=60)
+        nombre_error = gr.HTML(visible=False)
 
-    apellidos = gr.Textbox(label="Apellidos", max_length=60)
-    apellido_error = gr.HTML(visible=False)
+        apellidos = gr.Textbox(label="Apellidos", max_length=60)
+        apellido_error = gr.HTML(visible=False)
 
-    dni = gr.Textbox(label=f"DNI ({LARGO_DNI} dígitos)", max_length=LARGO_DNI)
-    dni_error = gr.HTML(visible=False)
+        dni = gr.Textbox(label=f"DNI ({LARGO_DNI} dígitos)", max_length=LARGO_DNI)
+        dni_error = gr.HTML(visible=False)
 
-    nro_celular = gr.Textbox(
-        label=f"Número de celular ({LARGO_CELULAR} dígitos)", max_length=LARGO_CELULAR
-    )
-    nro_celular_error = gr.HTML(visible=False)
+        nro_celular = gr.Textbox(
+            label=f"Número de celular ({LARGO_CELULAR} dígitos)",
+            max_length=LARGO_CELULAR,
+        )
+        nro_celular_error = gr.HTML(visible=False)
 
-    username = gr.Textbox(label="Usuario", max_length=30)
-    username_error = gr.HTML(visible=False)
+        username = gr.Textbox(label="Usuario", max_length=30)
+        username_error = gr.HTML(visible=False)
 
-    password = gr.Textbox(label="Contraseña", type="password")
-    password_error = gr.HTML(visible=False)
+        password = gr.Textbox(label="Contraseña", type="password")
+        password_error = gr.HTML(visible=False)
 
-    boton = gr.Button("Registrar", variant="primary")
-    resultado = gr.HTML()
+        boton = gr.Button("Registrar", variant="primary", size="lg")
+        resultado = gr.HTML()
+
+        gr.HTML(enlace_tarjeta("¿Ya tienes una cuenta?", "Inicia sesión", "/login"))
 
     nombres.input(fn=None, inputs=nombres, outputs=nombres, js=SOLO_LETRAS_JS)
     apellidos.input(fn=None, inputs=apellidos, outputs=apellidos, js=SOLO_LETRAS_JS)
