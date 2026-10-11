@@ -1,5 +1,5 @@
 /*
- * CSS compartido por las tres páginas Gradio (login, registro, inicio).
+ * CSS compartido por las dos páginas Gradio (login, inicio).
  *
  * Cada `gr.Blocks` se monta como app independiente, así que la hoja de estilos se
  * pasa en cada `mount_gradio_app` (css_paths): no hay un `<head>` común donde
@@ -310,7 +310,7 @@ input.campo-fecha-input {
 }
 
 
-/* ------------------------------------------- Tarjeta de login y registro */
+/* ------------------------------------------------------ Tarjeta de login */
 /* Recuadro angosto y centrado en vez de campos a lo ancho de la pantalla. */
 .tarjeta {
   width: 100%;
@@ -321,10 +321,6 @@ input.campo-fecha-input {
   background: #ffffff;
   border: 1px solid #e2e8f0;
   box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
-}
-
-.tarjeta-ancha {
-  max-width: 560px;
 }
 
 .tarjeta-cabecera {
@@ -349,19 +345,9 @@ input.campo-fecha-input {
   color: #64748b;
 }
 
-.tarjeta-pie {
-  text-align: center;
-  margin: 4px 0 0 0;
-}
-
-.tarjeta-pie a {
-  color: #1d4ed8;
-  font-weight: 600;
-}
-
 
 /* ------------------------------------------ Navegación entre páginas */
-/* Login ↔ registro ↔ inicio son páginas distintas: con esto el navegador
+/* Login ↔ inicio son páginas distintas: con esto el navegador
  * (Chrome/Edge) funde una en la otra en vez de parpadear en blanco. */
 @view-transition {
   navigation: auto;

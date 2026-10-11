@@ -1,12 +1,11 @@
 """Validaciones de los campos del registro de usuario.
 
-Viven aquí y no en el schema de Pydantic porque hay dos entradas al registro: el
-router `/api/auth/register` (que sí pasa por Pydantic) y la UI de Gradio, que llama
-a `register_service` directamente. El servicio las aplica para cubrir a las dos.
+Viven aquí y no en el schema de Pydantic para que `register_service` las aplique
+siempre, venga de donde venga la llamada. Hoy la única entrada es el router
+`/api/auth/register`: la UI no tiene registro, las cuentas las crea el administrador.
 
-`ErrorValidacion` hereda de `ValueError` a propósito: el router y la UI ya capturan
-`ValueError`, así que siguen funcionando sin cambios; el atributo `campo` es lo que
-permite a la UI pintar el mensaje debajo del input correcto.
+`ErrorValidacion` hereda de `ValueError` a propósito: el router ya captura
+`ValueError` y responde 400; el atributo `campo` indica qué dato falló.
 """
 
 import re

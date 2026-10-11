@@ -7,7 +7,7 @@ Markdown con la extensión *Markdown Preview Mermaid Support*), en GitHub y en
 1. [Capas y archivos](#1-capas-y-archivos)
 2. [Predicción diaria paso a paso](#2-predicción-diaria-paso-a-paso)
 3. [ETL: carga del reporte mensual](#3-etl-carga-del-reporte-mensual)
-4. [Login y registro](#4-login-y-registro)
+4. [Login y alta de usuarios](#4-login-y-alta-de-usuarios)
 5. [Base de datos](#5-base-de-datos)
 6. [Gradio: cómo se conecta un botón con Python](#6-gradio-cómo-se-conecta-un-botón-con-python)
 
@@ -26,13 +26,13 @@ flowchart TB
     subgraph MAIN["app/main.py — FastAPI"]
         direction TB
         lifespan["lifespan()<br/>carga modelos al arrancar"]
-        mount["gr.mount_gradio_app()<br/>/login · /registro · /inicio"]
+        mount["gr.mount_gradio_app()<br/>/login · /inicio"]
         routers["include_router()<br/>/api/auth · /api/prediccion"]
     end
 
     subgraph UI["app/ui — interfaz Gradio"]
         direction TB
-        paginas["paginas/<br/>login.py · registro.py · inicio.py"]
+        paginas["paginas/<br/>login.py · inicio.py"]
         comp["componentes.py<br/>banner, error_html, leer_js"]
         uiauth["auth.py<br/>autenticar()"]
         static["static/<br/>estilos.css · js/*.js"]
@@ -195,13 +195,13 @@ Entradas al ETL:
 
 ---
 
-## 4. Login y registro
+## 4. Login y alta de usuarios
 
 ```mermaid
 sequenceDiagram
     autonumber
     actor U as Usuario
-    participant R as registro.py
+    participant API as POST /api/auth/register
     participant L as login.js<br/>(navegador)
     participant G as Gradio auth<br/>/inicio/login
     participant A as ui/auth.py<br/>autenticar
@@ -209,15 +209,15 @@ sequenceDiagram
     participant P as utils/password.py
     participant DB as usuarios
 
-    Note over U,DB: Registro
-    U->>R: llena formulario → "Registrar"
-    R->>S: register_service(...)
+    Note over U,DB: Alta de usuario (solo el administrador, por API)
+    U->>API: JSON con nombres, apellidos, DNI, celular, usuario, contraseña
+    API->>S: register_service(...)
     S->>S: validar_datos_registro (DNI, celular, nombres…)
     S->>P: validate_password_strength (zxcvbn)
     S->>DB: ¿username / DNI / celular ya existen?
     S->>P: hash_password (pwdlib)
     S->>DB: INSERT usuario (contraseña hasheada)
-    R-->>U: error bajo el campo o banner verde
+    API-->>U: 200 usuario creado · 400 dato inválido · 409 duplicado
 
     Note over U,DB: Login
     U->>L: usuario + contraseña → "Iniciar sesión"
@@ -229,6 +229,22 @@ sequenceDiagram
     A-->>G: True / False
     G-->>L: 200 → redirige a /inicio<br/>401 → "Usuario o contraseña incorrectos"
 ```
+
+La UI **no** tiene página de registro: el sistema es solo para el administrador del
+grifo y un formulario público dejaría a cualquiera con el enlace crear cuenta y ver
+las predicciones. Las cuentas se crean con `POST /api/auth/register`.
+
+Toda la API REST (`/api/auth/*` y `/api/prediccion/*`) exige el header `X-API-Key`
+con el valor de la variable `API_KEY` (`app/core/seguridad.py`, aplicado en
+`include_router` de `main.py`). Sin la clave responde 401; si el servidor no tiene
+`API_KEY` configurada responde 503, así nunca queda abierta por olvido. En `/docs` se
+pone con el botón **Authorize**. La UI de Gradio no usa estas rutas (llama a los
+servicios directo), así que el login y `/inicio` funcionan igual.
+
+**Bloqueo por intentos fallidos** (`ui/auth.py`): tras 5 contraseñas erradas
+seguidas, ese usuario queda bloqueado 15 minutos aunque luego acierte. Es por usuario
+(Gradio no le pasa la IP a `autenticar`) y vive en memoria: reiniciar el servidor lo
+limpia. El mensaje de error es el mismo para clave errada y bloqueo.
 
 La contraseña **nunca** se guarda en texto plano: solo el hash. Al iniciar
 sesión se compara con `verify_password`.

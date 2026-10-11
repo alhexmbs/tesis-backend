@@ -11,13 +11,13 @@ import gradio as gr
 
 STATIC_DIR = Path(__file__).parent / "static"
 
-# Hoja de estilos compartida por las tres apps montadas (login, registro, inicio).
+# Hoja de estilos compartida por las dos apps montadas (login, inicio).
 CSS_PATH = STATIC_DIR / "estilos.css"
 
 # Librerías de terceros copiadas en `static/vendor` (sin depender de internet).
 VENDOR_DIR = STATIC_DIR / "vendor"
 
-# Íconos de Bootstrap (`<i class="bi bi-...">`): se inyecta en el <head> de las tres
+# Íconos de Bootstrap (`<i class="bi bi-...">`): se inyecta en el <head> de las dos
 # páginas. Solo funcionan dentro de gr.HTML: pestañas, labels y botones son texto.
 HEAD_ICONOS = (
     '<link rel="stylesheet" href="/vendor/bootstrap-icons/bootstrap-icons.min.css">'
@@ -78,7 +78,7 @@ def fecha_larga(d: date | str) -> str:
 
 
 def cabecera_tarjeta(subtitulo: str) -> str:
-    """Logo + nombre + subtítulo, arriba de las tarjetas de login y registro."""
+    """Logo + nombre + subtítulo, arriba de la tarjeta de login."""
     return (
         '<div class="tarjeta-cabecera">'
         '<div class="tarjeta-logo"><i class="bi bi-fuel-pump"></i></div>'
@@ -86,15 +86,6 @@ def cabecera_tarjeta(subtitulo: str) -> str:
         f'<div class="tarjeta-sub">{subtitulo}</div>'
         "</div>"
     )
-
-
-def enlace_tarjeta(texto: str, enlace: str, href: str) -> str:
-    """Pie de la tarjeta con un enlace que abre en la MISMA pestaña.
-
-    Va en gr.HTML y no en gr.Markdown porque Gradio abre en pestaña nueva todos los
-    enlaces de Markdown.
-    """
-    return f'<p class="tarjeta-pie">{texto} <a href="{href}">{enlace}</a></p>'
 
 
 SPINNER_HTML = (

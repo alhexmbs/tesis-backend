@@ -1,6 +1,6 @@
 import gradio as gr
 
-from app.ui.componentes import cabecera_tarjeta, enlace_tarjeta, leer_js
+from app.ui.componentes import cabecera_tarjeta, leer_js
 
 LOGIN_JS = leer_js("login.js")
 
@@ -16,8 +16,6 @@ with gr.Blocks(title="Iniciar sesión") as demo:
         login_error = gr.HTML()
 
         boton = gr.Button("Iniciar sesión", variant="primary", size="lg")
-
-        gr.HTML(enlace_tarjeta("¿No tienes cuenta?", "Regístrate", "/registro"))
 
     boton.click(
         fn=None,
