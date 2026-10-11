@@ -21,7 +21,7 @@ async (username, password) => {
     // Mismo mensaje para clave errada y usuario bloqueado (ui/auth.py): Gradio solo
     // responde sí/no y así tampoco se revela qué usuarios existen.
     return error(
-      "Usuario o contraseña incorrectos. Tras 5 intentos fallidos, el usuario se bloquea 15 minutos."
+      "Usuario o contraseña incorrectos."
     );
   } catch (e) {
     return error("No se pudo conectar con el servidor.");
