@@ -4,6 +4,7 @@ import gradio as gr
 import pandas as pd
 
 from app.database import SessionLocal
+from app.services.entregas import PlanImposible, planificar_entregas
 from app.services.prediccion.features import HistorialInsuficiente
 from app.services.prediccion.ingesta import ArchivoInvalido, ingerir_ventas_mensuales
 from app.services.prediccion.servicio import (
@@ -243,8 +244,51 @@ def _pedido_html(total: float, stock: float, producto: str) -> str:
     )
 
 
+def galones_validos(valor: float | None) -> int:
+    """Vacío o negativo → 0. No existe un tanque con galones negativos."""
+    return max(int(valor or 0), 0)
+
+
+def _plan_html(plan: dict) -> str:
+    """Bloque "Plan de entregas": qué días recibir combustible y cuánto."""
+    if not plan["entregas"]:
+        cuerpo = (
+            '<div class="msg-cuerpo">Con el stock actual alcanza para todo el rango: '
+            "<b>no hace falta pedir</b>.</div>"
+        )
+    else:
+        items = "".join(
+            f"<li><b>{fecha_larga(e['fecha'])}</b>: recibir "
+            f"<b>{e['entrega']:,.0f} galones</b> (el tanque tendría "
+            f"{e['stock_al_abrir']:,.0f} al abrir)</li>"
+            for e in plan["entregas"]
+        )
+        cuerpo = (
+            f'<div class="cifra">{plan["total_pedido"]:,.0f}'
+            f'<span class="unidad">galones en {len(plan["entregas"])} '
+            "entrega(s)</span></div>"
+            f'<ul class="msg-detalle">{items}</ul>'
+        )
+    return (
+        '<div class="pedido">'
+        '<div class="pedido-titulo"><i class="bi bi-truck"></i> Plan de entregas</div>'
+        f"{cuerpo}"
+        '<div class="msg-pie">Cada entrega llena el tanque hasta '
+        f"{plan['tope']:,.0f} galones y llega antes de abrir; si el proveedor demora, "
+        "llámalo con anticipación. Al final del rango quedarían "
+        f"{plan['stock_final']:,.0f} galones en el tanque.</div>"
+        "</div>"
+    )
+
+
 def predecir_rango_ui(
-    producto: str, fecha_inicio_str: str, dias: int, stock: float | None
+    producto: str,
+    fecha_inicio_str: str,
+    dias: int,
+    stock: float | None,
+    capacidad: float | None,
+    llenado_max: float,
+    stock_minimo: float | None,
 ):
     r, error = _ejecutar(predecir_rango, producto, fecha_inicio_str, int(dias))
     if error:
@@ -254,6 +298,29 @@ def predecir_rango_ui(
     tabla["fecha"] = tabla["fecha"].astype(str)
     tabla = tabla.rename(columns={"prediccion_galones": "galones"})
     total = float(tabla["galones"].sum())
+    stock = galones_validos(stock)
+
+    # Sin capacidad: un solo pedido (venta − stock). Con capacidad: plan de entregas
+    # día por día, porque puede que todo lo necesario no quepa de una vez.
+    plan = None
+    if galones_validos(capacidad) > 0:
+        try:
+            plan = planificar_entregas(
+                [(p["fecha"], p["prediccion_galones"]) for p in r["predicciones"]],
+                stock_inicial=stock,
+                capacidad=galones_validos(capacidad),
+                llenado_max_pct=llenado_max,
+                stock_minimo=galones_validos(stock_minimo),
+            )
+            bloque_pedido = _plan_html(plan)
+        except PlanImposible as e:
+            bloque_pedido = (
+                '<div class="pedido"><div class="pedido-titulo">'
+                '<i class="bi bi-exclamation-triangle"></i> No se pudo armar el plan '
+                f'de entregas</div><div class="msg-cuerpo">{e}</div></div>'
+            )
+    else:
+        bloque_pedido = _pedido_html(total, stock, r["producto"])
 
     cuerpo = (
         f'<div class="cifra">{total:,.0f}'
@@ -262,7 +329,7 @@ def predecir_rango_ui(
         f"<li><b>Promedio por día:</b> {total / len(tabla):,.0f} galones</li>"
         f"{_items_contexto(r)}"
         "</ul>"
-        f"{_pedido_html(total, max(float(stock or 0), 0), r['producto'])}"
+        f"{bloque_pedido}"
     ) + notas_html(r["notas"])
 
     resumen = banner(
@@ -273,7 +340,19 @@ def predecir_rango_ui(
     )
 
     # El gráfico necesita la fecha ISO para ordenar el eje; la tabla la muestra larga.
-    detalle = tabla.assign(fecha=tabla["fecha"].map(fecha_larga))
+    if plan:
+        # Con plan, el detalle muestra cómo se mueve el tanque cada día.
+        detalle = pd.DataFrame(
+            {
+                "fecha": [fecha_larga(d["fecha"]) for d in plan["dias"]],
+                "stock al abrir": [round(d["stock_al_abrir"]) for d in plan["dias"]],
+                "entrega": [round(d["entrega"]) for d in plan["dias"]],
+                "venta estimada": [round(d["venta"]) for d in plan["dias"]],
+                "stock al cerrar": [round(d["stock_al_cerrar"]) for d in plan["dias"]],
+            }
+        )
+    else:
+        detalle = tabla.assign(fecha=tabla["fecha"].map(fecha_larga))
     return tabla, resumen, detalle
 
 
@@ -510,14 +589,47 @@ with gr.Blocks(title="Inicio") as demo:
                 r_dias = gr.Slider(
                     1, MAX_HORIZONTE_DIAS, value=7, step=1, label="Días a predecir"
                 )
-            # Opcional: con el stock, el resumen dice cuánto pedir (venta − stock).
-            r_stock = gr.Number(
-                value=0,
-                minimum=0,
-                precision=0,
-                label="Stock en el tanque al inicio del rango (galones)",
-                info="Si lo dejas en 0, el pedido sugerido es toda la venta estimada.",
-            )
+            # Opcional: con el stock, el resumen dice cuánto pedir (venta − stock);
+            # si además se indica la capacidad, arma un plan de entregas día por día.
+            # Sin `minimum=0` a propósito: con él, Gradio deja escribir -5 igual y
+            # recién al predecir lanza un error en inglés. En su lugar, al salir del
+            # campo (blur) un negativo o vacío se corrige a 0 a la vista del usuario.
+            with gr.Accordion("Tanque y pedido (opcional)", open=True):
+                with gr.Row(equal_height=True):
+                    r_stock = gr.Number(
+                        value=0,
+                        precision=0,
+                        label="Stock al inicio del rango (galones)",
+                        info="Lo que hay en el tanque el primer día del rango.",
+                    )
+                    r_capacidad = gr.Number(
+                        value=0,
+                        precision=0,
+                        label="Capacidad del tanque (galones)",
+                        info="Si la dejas en 0, se sugiere un solo pedido.",
+                    )
+                    r_llenado = gr.Slider(
+                        80,
+                        100,
+                        value=95,
+                        step=1,
+                        label="Llenado máximo (%)",
+                        info="Los tanques no se llenan al 100 %: el combustible se "
+                        "dilata (GLP ≈ 85 %).",
+                    )
+                    r_minimo = gr.Number(
+                        value=0,
+                        precision=0,
+                        label="Stock mínimo (galones)",
+                        info="Reserva que nunca se toca: cubre errores y demoras.",
+                    )
+            for campo in (r_stock, r_capacidad, r_minimo):
+                campo.blur(
+                    galones_validos,
+                    inputs=campo,
+                    outputs=campo,
+                    show_progress="hidden",
+                )
             r_boton = gr.Button(
                 "Predecir rango", variant="primary", size="lg", interactive=False
             )
@@ -544,7 +656,15 @@ with gr.Blocks(title="Inicio") as demo:
                 )
                 .then(
                     predecir_rango_ui,
-                    inputs=[r_producto, r_fecha, r_dias, r_stock],
+                    inputs=[
+                        r_producto,
+                        r_fecha,
+                        r_dias,
+                        r_stock,
+                        r_capacidad,
+                        r_llenado,
+                        r_minimo,
+                    ],
                     outputs=[r_grafico, r_resumen, r_tabla],
                     show_progress="full",
                 )

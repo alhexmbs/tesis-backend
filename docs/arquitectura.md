@@ -10,6 +10,8 @@ Markdown con la extensión *Markdown Preview Mermaid Support*), en GitHub y en
 4. [Login y alta de usuarios](#4-login-y-alta-de-usuarios)
 5. [Base de datos](#5-base-de-datos)
 6. [Gradio: cómo se conecta un botón con Python](#6-gradio-cómo-se-conecta-un-botón-con-python)
+7. [Plan de entregas (stock y capacidad del tanque)](#7-plan-de-entregas-stock-y-capacidad-del-tanque)
+8. [Qué ve el usuario y qué no](#8-qué-ve-el-usuario-y-qué-no)
 
 ---
 
@@ -48,10 +50,11 @@ flowchart TB
     subgraph SERV["app/services — lógica de negocio"]
         direction TB
         sauth["auth.py<br/>register_service · login_service"]
-        spred["prediccion/servicio.py<br/>predecir_dia · predecir_rango<br/>metricas_modelo"]
+        spred["prediccion/servicio.py<br/>predecir_dia · predecir_rango<br/>metricas_modelo · venta_promedio_diaria"]
         etl["prediccion/ingesta.py<br/>extraccion.py · agregacion.py"]
         feat["prediccion/features.py<br/>17 features + base_28"]
-        clima["prediccion/clima.py<br/>temperatura (Open-Meteo)"]
+        clima["prediccion/clima.py<br/>temperatura (Open-Meteo)<br/>en memoria 1 hora"]
+        entregas["entregas.py<br/>planificar_entregas<br/>(no usa el modelo)"]
     end
 
     subgraph UTIL["app/utils"]
@@ -73,7 +76,7 @@ flowchart TB
     routers --> rauth & rpred
     rauth & rpred --> schemas
 
-    paginas --> sauth & spred & etl
+    paginas --> sauth & spred & etl & entregas
     uiauth --> sauth
     rauth --> sauth
     rpred --> spred & etl
@@ -116,6 +119,9 @@ sequenceDiagram
     DB-->>S: filas diarias (cantidad, precio, …)
     S->>S: ¿el hueco hasta la fecha ≤ 15 días?
     S->>C: obtener_temperatura_max(fecha)
+    opt La memoria del clima venció (más de 1 hora)
+        C->>C: 1 sola petición a Open-Meteo<br/>(31 días atrás + 16 adelante)
+    end
     C-->>S: °C (pronóstico o promedio del mes)
 
     opt Hay días sin cargar entre el último real y la fecha
@@ -147,6 +153,14 @@ sequenceDiagram
   tratarlos como ceros.
 - **Predicción de rango** = el mismo proceso en bucle, un día tras otro, usando
   cada predicción como historial del siguiente.
+- **¿Por qué es rápida?** Antes `clima.py` hacía una petición HTTP **por día**
+  (~0.7 s cada una): con 10 días de puente eran ~7 s. Ahora una sola petición trae
+  47 días y queda en memoria 1 hora (`_temperaturas`, protegida con un `Lock`
+  porque Gradio atiende varias peticiones a la vez). Los valores son los mismos que
+  día por día. Si Open-Meteo falla, se usa el promedio del mes durante 5 minutos y
+  luego se reintenta (antes cada día podía esperar 10 s de timeout).
+- **Lo que aún tarda** es la base de datos si se usa el proxy público de Railway
+  (~0.35 s por consulta). Desplegado en Railway con la red privada es mucho menor.
 
 ---
 
@@ -296,15 +310,19 @@ Patrón que se repite en todas las páginas. Ejemplo real de `inicio.py`
 flowchart LR
     subgraph IN["inputs=[...] (en orden)"]
         i1["r_producto<br/>Dropdown"]
-        i2["r_fecha<br/>Textbox"]
+        i2["r_fecha<br/>calendario (HTML)"]
         i3["r_dias<br/>Slider"]
+        i4["r_stock<br/>Number"]
+        i5["r_capacidad<br/>Number"]
+        i6["r_llenado<br/>Slider"]
+        i7["r_minimo<br/>Number"]
     end
 
-    fn["predecir_rango_ui(<br/>producto,<br/>fecha_inicio_str,<br/>dias)<br/><br/>return tabla, resumen, tabla"]
+    fn["predecir_rango_ui(<br/>producto,<br/>fecha_inicio_str,<br/>dias,<br/>stock,<br/>capacidad,<br/>llenado_max,<br/>stock_minimo)<br/><br/>return tabla, resumen, detalle"]
 
     subgraph OUT["outputs=[...] (en orden)"]
         o1["r_grafico<br/>LinePlot"]
-        o2["r_aviso<br/>HTML"]
+        o2["r_resumen<br/>HTML"]
         o3["r_tabla<br/>Dataframe"]
     end
 
@@ -312,6 +330,7 @@ flowchart LR
     i1 -- "1.er parámetro" --> fn
     i2 -- "2.º parámetro" --> fn
     i3 -- "3.er parámetro" --> fn
+    i4 & i5 & i6 & i7 -- "4.º a 7.º parámetro" --> fn
     fn -- "1.er valor" --> o1
     fn -- "2.º valor" --> o2
     fn -- "3.er valor" --> o3
@@ -320,3 +339,77 @@ flowchart LR
 Regla: **cada componente de `inputs` entra como parámetro, en orden; cada valor
 del `return` va al componente de `outputs`, en orden.** Si agregas un output,
 la función tiene que devolver un valor más.
+
+Otro evento del mismo patrón: al salir de un campo de galones (`.blur`), se llama a
+`galones_validos` con ese campo como input **y** como output, así un `-5` o un campo
+vacío vuelve a `0` en pantalla. No se usa `minimum=0` de Gradio porque deja escribir
+el negativo igual y recién al predecir lanza un error en inglés.
+
+---
+
+## 7. Plan de entregas (stock y capacidad del tanque)
+
+Responde **qué día recibir combustible y cuánto**, en la pestaña de rango. Vive en
+`app/services/entregas.py`: no usa Gradio ni el modelo, solo recibe la venta
+estimada de cada día (`predecir_rango`) y simula el tanque.
+
+```mermaid
+flowchart TB
+    ini(["stock = stock inicial<br/>tope = capacidad × llenado %"])
+    val{"¿datos posibles?<br/>stock ≤ capacidad<br/>mínimo < tope<br/>venta del día ≤ tope − mínimo"}
+    err["PlanImposible<br/>aviso en español"]
+    dia["siguiente día del rango"]
+    q{"¿stock − venta<br/>queda bajo el mínimo?"}
+    ent["ENTREGA antes de abrir<br/>entrega = tope − stock<br/>stock = tope"]
+    vende["stock = stock − venta"]
+    fin(["entregas · total pedido<br/>stock final"])
+
+    ini --> val
+    val -- no --> err
+    val -- sí --> dia --> q
+    q -- sí --> ent --> vende
+    q -- no --> vende
+    vende -- "quedan días" --> dia
+    vende -- "último día" --> fin
+```
+
+Ejemplo (venta de ~71 gal/día, stock 100, tanque de 300 al 100 %): entrega de 271
+el día 2 y de 286 el día 6; el tanque cierra la semana con 157.
+
+- **Sin capacidad (0):** no hay plan; se sugiere un solo pedido = venta − stock, más
+  una versión "con colchón" que suma el error típico del modelo (MAPE).
+- **Llenar el tanque en cada entrega** = menos entregas (menos fletes).
+- **Llenado máximo** (por defecto 95 %): los tanques no se llenan al 100 % porque
+  el combustible se dilata (el GLP, ≈ 85 %).
+- **Stock mínimo:** reserva que nunca se toca; cubre errores del modelo y demoras.
+- **Supuesto:** la entrega llega el mismo día, antes de abrir. No se modelan días
+  de anticipación del proveedor ni tamaños fijos de cisterna.
+- La tabla "Detalle" muestra por día: stock al abrir, entrega, venta estimada y
+  stock al cerrar.
+
+---
+
+## 8. Qué ve el usuario y qué no
+
+La UI es para el encargado o el contador del grifo, no para un estadístico.
+
+| Dato | ¿Lo usa el modelo? | ¿Se muestra? | Por qué |
+|---|---|---|---|
+| Temperatura máxima | sí (feature) | **no** | No sirve para decidir nada y confunde ("¿qué tiene que ver el clima?"). Sigue en la respuesta de la API. |
+| 17 features (lags, razones…) | sí | no | Solo en la API, para trazabilidad. |
+| Venta diaria promedio del último mes (`base_28`) | sí | sí | Da escala a la cifra predicha. |
+| Precio de referencia | sí (congelado) | sí | Contexto. |
+
+**Pestaña de métricas, en lenguaje llano** (`cargar_metricas_ui`):
+
+- El error en galones va **junto a la venta diaria** del producto
+  (`venta_promedio_diaria`, últimos 90 días hasta la fecha de entrenamiento) y en %:
+  138 galones de error en GLP asustan, pero sobre ~2,900 gal/día son < 5 %.
+- En vez de MASE se compara con el **método simple**: repetir lo vendido el mismo
+  día de la semana pasada (naive estacional). `metricas_modelo` calcula
+  `mejora_vs_simple_pct = (1 − MAE_modelo / MAE_naive) × 100` con los números de
+  `config_servicio.json`: REGULAR 21 %, PREMIUM 34 %, GLP 15 % menos error.
+- **¿Cómo sé que el modelo acierta en el futuro?** Además de estos 90 días de
+  holdout, el notebook `backtesting.ipynb` simula 38 meses pasados como si fueran
+  futuro, reentrenando cada mes. Su escenario S3 (bloque ciego, recursivo) es
+  exactamente lo que hace la predicción de rango.
