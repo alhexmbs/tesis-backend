@@ -470,6 +470,28 @@ def ultimo_dia_historial(db: Session, producto: str) -> date | None:
     return registro.fecha if registro else None
 
 
+def venta_promedio_diaria(
+    db: Session, producto: str, hasta: date, dias: int = 90
+) -> float | None:
+    """Galones vendidos por día, en promedio, en los ``dias`` días hasta ``hasta``.
+
+    La UI lo pone al lado del error medio: 138 galones de error asustan, pero en un
+    producto que vende ~2,900 galones al día son menos del 5 %.
+    """
+    desde = hasta - timedelta(days=dias - 1)
+    cantidades = [
+        float(r.cantidad)
+        for r in db.query(HistorialVenta)
+        .filter(
+            HistorialVenta.producto == producto,
+            HistorialVenta.fecha >= desde,
+            HistorialVenta.fecha <= hasta,
+        )
+        .all()
+    ]
+    return sum(cantidades) / len(cantidades) if cantidades else None
+
+
 def listar_historial(db: Session, producto: str) -> list[HistorialVenta]:
     art = obtener_artefactos()
     _validar_producto(producto, art)
@@ -485,10 +507,17 @@ def metricas_modelo() -> dict:
     """Métricas de holdout del modelo servido, solo para REGULAR/PREMIUM/GLP.
 
     Toma los números de config_servicio.json (no escritos a mano) y, por producto,
-    deriva el 'acierto' (100 - MAPE) y el error medio en galones/día (MAE).
+    deriva el 'acierto' (100 - MAPE), el error medio en galones/día (MAE) y cuánto
+    menos se equivoca que el método simple de "repetir lo que se vendió el mismo día
+    de la semana pasada" (naive estacional, evaluado en los mismos 90 días).
     """
     art = obtener_artefactos()
     modelo = art.config["modelo"]  # "ridge"
+    mae_naive = {
+        m["producto"]: m["mae"]
+        for m in art.config["metricas_holdout"]
+        if m["modelo"] == "naive_estacional"
+    }
     filas = []
     for m in art.config["metricas_holdout"]:
         if m["producto"] in art.productos and m["modelo"] == modelo:
@@ -497,6 +526,10 @@ def metricas_modelo() -> dict:
                     "producto": m["producto"],
                     "acierto_pct": round(100 - m["mape"], 1),
                     "error_medio_galones": round(m["mae"], 0),
+                    # 1 - MAE_modelo / MAE_naive: 20 = se equivoca 20 % menos.
+                    "mejora_vs_simple_pct": round(
+                        (1 - m["mae"] / mae_naive[m["producto"]]) * 100, 1
+                    ),
                     "mape": round(m["mape"], 2),
                     "mae": round(m["mae"], 2),
                     "rmse": round(m["rmse"], 2),

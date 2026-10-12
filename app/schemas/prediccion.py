@@ -101,6 +101,8 @@ class MetricaProducto(BaseModel):
     producto: str
     acierto_pct: float
     error_medio_galones: float
+    # Cuánto menos se equivoca que repetir el mismo día de la semana pasada.
+    mejora_vs_simple_pct: float
     mape: float
     mae: float
     rmse: float

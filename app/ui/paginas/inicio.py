@@ -14,6 +14,7 @@ from app.services.prediccion.servicio import (
     predecir_dia,
     predecir_rango,
     ultimo_dia_historial,
+    venta_promedio_diaria,
 )
 from app.ui.calendario import calendario
 from app.ui.componentes import (
@@ -152,7 +153,7 @@ def _items_contexto(r: dict) -> str:
     """Filas comunes a los dos resúmenes: precio usado y hasta cuándo hay ventas."""
     return (
         f"<li><b>Precio considerado:</b> S/ {r['precio_referencia']:.2f} "
-        "(el último registrado)</li>"
+        "por galón</li>"
         f"<li><b>Ventas cargadas hasta:</b> {fecha_larga(r['ultimo_dia_real'])}</li>"
     )
 
@@ -168,13 +169,14 @@ def predecir_ui(producto: str, fecha_str: str):
     # Solo lo que el encargado del grifo puede leer y usar: galones del día, con qué
     # se está comparando y hasta cuándo llegan las ventas cargadas. Las 17 features
     # (lags, razones, cv) siguen en la respuesta de la API, pero no se muestran.
+    # La temperatura tampoco: el modelo sí la usa, pero al encargado no le sirve para
+    # decidir nada (y genera la pregunta "¿qué tiene que ver el clima?").
     cuerpo = (
         f'<div class="cifra">{r["prediccion_galones"]:,.0f}'
         '<span class="unidad">galones</span></div>'
         '<ul class="msg-detalle">'
         "<li><b>Venta diaria promedio del último mes:</b> "
         f"{r['promedio_diario_28']:,.0f} galones</li>"
-        f"<li><b>Temperatura máxima esperada:</b> {r['temperatura_max']:.0f} °C</li>"
         f"{_items_contexto(r)}"
         "</ul>"
     ) + notas_html(r["notas"])
@@ -203,7 +205,47 @@ def ajustar_rango(producto: str, fecha_inicio: str | None, dias: int):
     )
 
 
-def predecir_rango_ui(producto: str, fecha_inicio_str: str, dias: int):
+def _error_tipico_pct(producto: str) -> float:
+    """Error típico del modelo para el producto, en % de la venta (MAPE de holdout)."""
+    for fila in metricas_modelo()["metricas"]:
+        if fila["producto"] == producto:
+            return fila["mape"]
+    return 0.0
+
+
+def _pedido_html(total: float, stock: float, producto: str) -> str:
+    """Bloque "cuánto pedir": lo que se venderá menos lo que ya hay en el tanque.
+
+    - Pedido sugerido = venta estimada − stock (nunca negativo).
+    - Con colchón = venta estimada + su error típico (%) − stock: por si se vende
+      más de lo previsto. El % es el mismo de la pestaña de métricas.
+    """
+    error_pct = _error_tipico_pct(producto)
+    pedido = max(total - stock, 0)
+    con_colchon = max(total * (1 + error_pct / 100) - stock, 0)
+    if pedido == 0:
+        detalle = (
+            f"Con {stock:,.0f} galones en el tanque alcanza para cubrir los "
+            f"{total:,.0f} galones estimados: <b>no hace falta pedir</b>."
+        )
+    else:
+        detalle = (
+            f"Se venderían {total:,.0f} galones y ya hay {stock:,.0f} en el tanque."
+        )
+    return (
+        '<div class="pedido">'
+        '<div class="pedido-titulo"><i class="bi bi-truck"></i> Pedido sugerido</div>'
+        f'<div class="cifra">{pedido:,.0f}<span class="unidad">galones</span></div>'
+        f'<div class="msg-cuerpo">{detalle}</div>'
+        f'<div class="msg-pie">Con colchón de seguridad (+{error_pct:.0f} %, el error '
+        f"típico del modelo): <b>{con_colchon:,.0f} galones</b>.</div>"
+        "</div>"
+    )
+
+
+def predecir_rango_ui(
+    producto: str, fecha_inicio_str: str, dias: int, stock: float | None
+):
     r, error = _ejecutar(predecir_rango, producto, fecha_inicio_str, int(dias))
     if error:
         return None, error, None
@@ -220,6 +262,7 @@ def predecir_rango_ui(producto: str, fecha_inicio_str: str, dias: int):
         f"<li><b>Promedio por día:</b> {total / len(tabla):,.0f} galones</li>"
         f"{_items_contexto(r)}"
         "</ul>"
+        f"{_pedido_html(total, max(float(stock or 0), 0), r['producto'])}"
     ) + notas_html(r["notas"])
 
     resumen = banner(
@@ -334,27 +377,64 @@ def cargar_xlsx_ui(archivos, progress=gr.Progress()):
 # --------------------------------------------------------------------------- #
 # Métricas del modelo (lenguaje llano)
 # --------------------------------------------------------------------------- #
+def _ventas_promedio(productos: list[str], hasta: date) -> dict:
+    """Venta diaria promedio de cada producto en los 90 días evaluados."""
+    try:
+        db = SessionLocal()
+        try:
+            return {p: venta_promedio_diaria(db, p, hasta) for p in productos}
+        finally:
+            db.close()
+    except Exception:
+        return {}
+
+
 def cargar_metricas_ui():
+    """Métricas explicadas para alguien que no es estadístico.
+
+    Un error de 138 galones suena enorme si no se sabe cuánto se vende: por eso cada
+    error va al lado de la venta diaria del producto y en %. Y en vez de "MAPE" o
+    "MASE" se compara con lo que haría una persona sin modelo: pedir lo mismo que se
+    vendió el mismo día de la semana pasada.
+    """
     m = metricas_modelo()
-    filas = "".join(
-        f"<li><b>{fila['producto']}</b> — {fila['acierto_pct']:.1f} % de acierto, "
-        f"{fila['error_medio_galones']:.0f} gal/día de error medio</li>"
-        for fila in m["metricas"]
-    )
+    entrenado = date.fromisoformat(m["fecha_entrenamiento"])
+    ventas = _ventas_promedio([f["producto"] for f in m["metricas"]], entrenado)
+
+    filas_html = ""
+    filas_tabla = []
+    for f in m["metricas"]:
+        venta = ventas.get(f["producto"])
+        escala = f" de unos {venta:,.0f} que se venden" if venta else ""
+        filas_html += (
+            f"<li><b>{f['producto']}</b>: se equivoca en promedio "
+            f"{f['error_medio_galones']:,.0f} galones al día{escala} "
+            f"(≈ {f['mape']:.0f} de cada 100 galones). Se equivoca "
+            f"<b>{f['mejora_vs_simple_pct']:.0f} % menos</b> que repetir la venta de "
+            "la semana pasada.</li>"
+        )
+        filas_tabla.append(
+            {
+                "Producto": f["producto"],
+                "Venta promedio (gal/día)": round(venta) if venta else None,
+                "Error medio (gal/día)": f["error_medio_galones"],
+                "Error medio (%)": f["mape"],
+                "Mejora vs. método simple (%)": f["mejora_vs_simple_pct"],
+            }
+        )
+
     cuerpo = (
-        '<div class="msg-cuerpo">Evaluado sobre los <b>últimos 90 días que el '
-        f"modelo nunca vio</b> (entrenado hasta {m['fecha_entrenamiento']}). "
-        "Por cada producto:</div>"
-        f'<ul class="msg-detalle">{filas}</ul>'
-        '<div class="msg-pie"><b>Acierto</b>: qué tan cerca quedó, en promedio '
-        "(100 % sería perfecto). · <b>Error medio</b>: cuántos galones, en "
-        "promedio, se equivocó por día.</div>"
+        '<div class="msg-cuerpo">Se le pidió al modelo predecir <b>90 días cuyas '
+        "ventas reales ya se conocían</b> (sin mostrárselas) y luego se comparó día "
+        "por día lo que dijo con lo que de verdad se vendió:</div>"
+        f'<ul class="msg-detalle">{filas_html}</ul>'
+        '<div class="msg-pie"><b>Error medio</b>: cuánto se aleja la predicción de '
+        "la venta real en un día cualquiera; unos días se pasa y otros se queda "
+        "corto. · <b>Método simple</b>: pedir lo mismo que se vendió el mismo día de "
+        "la semana pasada, que es lo que se haría sin el sistema.</div>"
     )
-    tabla = pd.DataFrame(m["metricas"])[
-        ["producto", "acierto_pct", "error_medio_galones", "mape", "mae"]
-    ]
     titulo = "¿Qué tan bien predice el modelo?"
-    return banner("info", "bar-chart", titulo, cuerpo), tabla
+    return banner("info", "bar-chart", titulo, cuerpo), pd.DataFrame(filas_tabla)
 
 
 with gr.Blocks(title="Inicio") as demo:
@@ -430,6 +510,14 @@ with gr.Blocks(title="Inicio") as demo:
                 r_dias = gr.Slider(
                     1, MAX_HORIZONTE_DIAS, value=7, step=1, label="Días a predecir"
                 )
+            # Opcional: con el stock, el resumen dice cuánto pedir (venta − stock).
+            r_stock = gr.Number(
+                value=0,
+                minimum=0,
+                precision=0,
+                label="Stock en el tanque al inicio del rango (galones)",
+                info="Si lo dejas en 0, el pedido sugerido es toda la venta estimada.",
+            )
             r_boton = gr.Button(
                 "Predecir rango", variant="primary", size="lg", interactive=False
             )
@@ -456,7 +544,7 @@ with gr.Blocks(title="Inicio") as demo:
                 )
                 .then(
                     predecir_rango_ui,
-                    inputs=[r_producto, r_fecha, r_dias],
+                    inputs=[r_producto, r_fecha, r_dias, r_stock],
                     outputs=[r_grafico, r_resumen, r_tabla],
                     show_progress="full",
                 )
