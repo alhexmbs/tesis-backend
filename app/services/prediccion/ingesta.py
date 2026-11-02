@@ -185,7 +185,12 @@ def guardar_reporte(db: Session, df: pd.DataFrame) -> dict:
     ultimo = ultimo_dia_registrado(db)
     if ultimo is not None:
         siguiente = ultimo + timedelta(days=1)
-        if fecha_min != siguiente:
+        # TEMPORAL: los reportes de febrero de años bisiestos (2024) no traen el 29;
+        # se acepta que marzo empiece el 1 sin exigir ese día.
+        salta_bisiesto = (siguiente.month, siguiente.day) == (2, 29) and fecha_min == (
+            siguiente + timedelta(days=1)
+        )
+        if fecha_min != siguiente and not salta_bisiesto:
             raise HuecoEnHistorial(
                 f"El último día registrado es el {_fecha_larga(ultimo)}. Sube el "
                 f"reporte a partir del {_fecha_larga(siguiente)} para no dejar días "
