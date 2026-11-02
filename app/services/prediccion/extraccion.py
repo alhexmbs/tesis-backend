@@ -53,7 +53,7 @@ def extraer_excel(contenido_archivo: bytes) -> pd.DataFrame:
     faltantes = [c for c in COLUMNAS_REQUERIDAS_XLSX if c not in df.columns]
     if faltantes:
         raise ValueError(
-            "El archivo .xlsx no tiene el formato del reporte de ventas esperado. Para más información consulte el manual de usuario en la sección Flujo de carga de reporte de ventas"
+            "El archivo .xlsx no tiene el formato del reporte de ventas esperado. Para más información consulte el manual de usuario en la sección Carga de reporte de ventas"
         )
 
 
