@@ -1,10 +1,13 @@
+import logging
 from contextlib import asynccontextmanager
 
 import gradio as gr
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
 
+from app.core.config import settings
 from app.core.seguridad import verificar_api_key
 from app.database import Base, engine
 
@@ -19,7 +22,26 @@ from app.ui.componentes import CSS_PATH, HEAD_ICONOS, TEMA, VENDOR_DIR, leer_js
 from app.ui.paginas.inicio import demo as inicio_demo
 from app.ui.paginas.login import demo as login_demo
 
+logger = logging.getLogger(__name__)
+
 Base.metadata.create_all(bind=engine)
+
+# create_all solo crea tablas nuevas: no agrega columnas a una tabla que ya existe.
+# Las cuentas creadas antes de esta columna quedan en 0 y cambian su contraseña una
+# vez en su próximo ingreso.
+with engine.begin() as conexion:
+    for sentencia in (
+        "ALTER TABLE usuarios "
+        "ADD COLUMN IF NOT EXISTS inicios_sesion INTEGER NOT NULL DEFAULT 0",
+        # Recuperación de contraseña por correo. email queda en NULL: el
+        # administrador lo carga por SQL a cada usuario.
+        "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS email VARCHAR NULL",
+        "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS reset_token_hash VARCHAR NULL",
+        "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS reset_token_expira TIMESTAMP NULL",
+        # Único, pero varios usuarios pueden seguir sin correo (NULL no se repite).
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_usuarios_email ON usuarios (email)",
+    ):
+        conexion.execute(text(sentencia))
 
 
 @asynccontextmanager
@@ -72,11 +94,14 @@ app = gr.mount_gradio_app(
 
 # "/inicio" es un único Blocks con pestañas (predicción diaria, rango, carga de ventas,
 # métricas): todas quedan detrás de la misma sesión de login.
+if settings.ui_sin_login:
+    logger.warning("UI_SIN_LOGIN activo: /inicio se abre sin autenticación.")
+
 app = gr.mount_gradio_app(
     app,
     inicio_demo,
     path="/inicio",
-    auth=autenticar,
+    auth=None if settings.ui_sin_login else autenticar,
     js=FORCE_LIGHT_JS,
     css_paths=[CSS_PATH],
     theme=TEMA,

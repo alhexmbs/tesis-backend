@@ -15,6 +15,9 @@ from datetime import date
 _NOMBRE_RE = re.compile(r"^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ][A-Za-zÁÉÍÓÚÜÑáéíóúüñ' -]*$")
 _SOLO_DIGITOS_RE = re.compile(r"^\d+$")
 _FECHA_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# Forma básica usuario@dominio.ext, sin espacios. La prueba real de que el correo
+# existe es que llegue el enlace de recuperación.
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 LARGO_DNI = 8
 LARGO_CELULAR = 9
@@ -92,6 +95,18 @@ def validar_username(valor) -> str:
     return valor
 
 
+def validar_email(valor) -> str:
+    """Se guarda en minúsculas: la recuperación busca el correo sin distinguirlas."""
+    valor = _texto(valor).lower()
+    if not valor:
+        raise ErrorValidacion("email", "El correo no puede estar vacío.")
+    if len(valor) > 254 or not _EMAIL_RE.match(valor):
+        raise ErrorValidacion(
+            "email", "Correo inválido. Usa el formato usuario@dominio.com."
+        )
+    return valor
+
+
 def validar_fecha(valor, campo: str = "fecha") -> date:
     """Fecha en formato AAAA-MM-DD. Rechaza letras antes de intentar parsearla."""
     valor = _texto(valor)
@@ -109,7 +124,7 @@ def validar_fecha(valor, campo: str = "fecha") -> date:
         raise ErrorValidacion(campo, "Esa fecha no existe en el calendario.") from None
 
 
-def validar_datos_registro(nombres, apellidos, dni, nro_celular, username) -> dict:
+def validar_datos_registro(nombres, apellidos, dni, nro_celular, username, email) -> dict:
     """Valida y normaliza los campos del registro. Lanza `ErrorValidacion` al primer fallo."""
     return {
         "nombres": validar_nombre(nombres, "nombres", "Los nombres"),
@@ -117,4 +132,5 @@ def validar_datos_registro(nombres, apellidos, dni, nro_celular, username) -> di
         "dni": validar_dni(dni),
         "nro_celular": validar_nro_celular(nro_celular),
         "username": validar_username(username),
+        "email": validar_email(email),
     }

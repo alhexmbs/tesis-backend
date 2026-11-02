@@ -42,7 +42,7 @@ class PredecirRangoRequest(BaseModel):
     fecha_inicio: date
     # Tope duro: sin ventas diarias que refresquen la serie, proyectar más de 15 días
     # desde el final del historial no aporta calidad (ver MAX_HORIZONTE_DIAS).
-    dias: int = Field(ge=1, le=15)
+    dias: int = Field(ge=1, le=37)  # TEMPORAL para pruebas: el valor real es 15
 
 
 class PrediccionDia(BaseModel):

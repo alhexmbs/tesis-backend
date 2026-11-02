@@ -277,29 +277,20 @@ input.campo-fecha-input {
   cursor: pointer;
 }
 
-.boton-manana {
-  padding: 0 14px;
-  border: 1px solid #cbd5e1;
-  border-radius: var(--input-radius);
-  background: #ffffff;
-  color: #1d4ed8;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.boton-manana:hover:not(:disabled) {
-  background: #eff6ff;
-}
-
-.boton-manana:disabled {
-  color: #94a3b8;
-  cursor: not-allowed;
-}
-
 /* Flatpickr: nombre del mes con mayúscula inicial ("Septiembre"). */
 .flatpickr-current-month,
 .flatpickr-monthDropdown-months {
   text-transform: capitalize;
+}
+
+
+/* ------------------------------------------------- Aviso de ventas vacío */
+/* Un gr.HTML vacío igual ocupa su bloque y el espacio entre componentes, lo que deja
+ * un hueco bajo las pestañas. Se oculta mientras no tenga un aviso (.msg) adentro;
+ * no se usa visible=False porque el botón "Cargar ventas" del aviso necesita que el
+ * componente siga en la página. */
+.aviso-vacio-oculto:not(:has(.msg)) {
+  display: none !important;
 }
 
 
@@ -324,6 +315,19 @@ input.campo-fecha-input {
 
 .boton-ir-carga .bi {
   color: #ffffff
+}
+
+
+/* ------------------------------------ Botón "Descargar reporte en Excel" */
+/* Verde suave. !important porque el tema de Gradio pinta el botón secundario. */
+.boton-excel {
+  background: #dcfce7 !important;
+  color: #166534 !important;
+  border: 1px solid #86efac !important;
+}
+
+.boton-excel:hover {
+  background: #bbf7d0 !important;
 }
 
 

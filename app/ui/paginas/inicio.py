@@ -1,23 +1,40 @@
-from datetime import date, timedelta
+import tempfile
+from datetime import date, timedelta, datetime
+from pathlib import Path
 
 import gradio as gr
 import pandas as pd
 
 from app.database import SessionLocal
-from app.services.entregas import PlanImposible, planificar_entregas
+from app.services.entregas import (
+    DIAS_SEMANA,
+    PlanImposible,
+    ReglasPedido,
+    capacidad_cisterna,
+    planificar_entregas,
+    validar_tanque,
+)
 from app.services.prediccion.features import HistorialInsuficiente
-from app.services.prediccion.ingesta import ArchivoInvalido, ingerir_ventas_mensuales
+from app.services.prediccion.ingesta import (
+    ArchivoInvalido,
+    guardar_reporte,
+    leer_reporte,
+    ultimo_dia_registrado,
+)
 from app.services.prediccion.servicio import (
     MAX_HORIZONTE_DIAS,
     FechaEnPasado,
     ProductoNoServido,
+    margen_error_galones,
     metricas_modelo,
     predecir_dia,
     predecir_rango,
     ultimo_dia_historial,
     venta_promedio_diaria,
+    verificacion_ultimo_mes,
 )
 from app.ui.calendario import calendario
+
 from app.ui.componentes import (
     ENCABEZADO_HTML,
     SPINNER_HTML,
@@ -27,6 +44,7 @@ from app.ui.componentes import (
     leer_js,
     notas_html,
 )
+
 from app.utils.validaciones import ErrorValidacion, validar_fecha
 
 PRODUCTOS = ["REGULAR", "PREMIUM", "GLP"]
@@ -107,7 +125,9 @@ def limites_fecha(producto: str):
             maximo=maximo.isoformat(),
         ),
         gr.update(value=""),
-        gr.update(interactive=True),
+        # El botón no se toca aquí: lo decide `ajustar_rango` al cambiar la fecha,
+        # porque además depende de los datos del tanque.
+        gr.update(),
     )
 
 
@@ -189,21 +209,62 @@ def predecir_ui(producto: str, fecha_str: str):
 # --------------------------------------------------------------------------- #
 # Predicción de rango
 # --------------------------------------------------------------------------- #
-def ajustar_rango(producto: str, fecha_inicio: str | None, dias: int):
-    """Al cambiar la fecha de inicio: activa "Predecir rango" y acota el slider.
+def _datos_completos(
+    fecha_inicio: str | None, stock: float | None, capacidad: float | None
+) -> bool:
+    """"Predecir rango" solo se habilita con fecha, galones actuales y capacidad.
+
+    Los galones actuales pueden ser 0 (tanque vacío); la capacidad no.
+    """
+    return (
+        bool(fecha_inicio)
+        and stock is not None
+        and stock >= 0
+        and capacidad is not None
+        and capacidad > 0
+    )
+
+
+def estado_boton(fecha_inicio: str | None, stock: float | None, capacidad: float | None):
+    """Al escribir en los campos del tanque: habilita o deshabilita el botón."""
+    return gr.update(interactive=_datos_completos(fecha_inicio, stock, capacidad))
+
+
+def ajustar_rango(
+    producto: str,
+    fecha_inicio: str | None,
+    dias: int,
+    stock: float | None,
+    capacidad: float | None,
+):
+    """Al cambiar la fecha de inicio: habilita "Predecir rango" y acota el slider.
 
     El slider no deja pedir días más allá del máximo del calendario (último día
-    con ventas + MAX_HORIZONTE_DIAS).
+    con ventas + MAX_HORIZONTE_DIAS). El botón además exige los datos del tanque.
     """
     ultimo = _ultimo_dia(producto)
     if not fecha_inicio or ultimo is None:
-        return gr.update(interactive=False), gr.update()
+        return gr.update(interactive=False), gr.update(info=None)
     maximo = ultimo + timedelta(days=MAX_HORIZONTE_DIAS)
     dias_max = max((maximo - date.fromisoformat(fecha_inicio)).days + 1, 1)
+    dias = min(int(dias), dias_max)
     return (
-        gr.update(interactive=True),
-        gr.update(maximum=dias_max, value=min(int(dias), dias_max)),
+        gr.update(interactive=_datos_completos(fecha_inicio, stock, capacidad)),
+        gr.update(maximum=dias_max, value=dias, info=texto_hasta(fecha_inicio, dias)),
     )
+
+
+def texto_hasta(fecha_inicio: str | None, dias: int) -> str | None:
+    """Texto bajo el slider: hasta qué día llega el pronóstico, sin contar a mano."""
+    if not fecha_inicio:
+        return None
+    fin = date.fromisoformat(fecha_inicio) + timedelta(days=int(dias) - 1)
+    return f"Pronóstico hasta el {fecha_larga(fin)}"
+
+
+def actualizar_hasta(fecha_inicio: str | None, dias: int):
+    """Al mover el slider: actualiza el texto "Pronóstico hasta el…"."""
+    return gr.update(info=texto_hasta(fecha_inicio, dias))
 
 
 def _error_tipico_pct(producto: str) -> float:
@@ -249,36 +310,167 @@ def galones_validos(valor: float | None) -> int:
     return max(int(valor or 0), 0)
 
 
-def _plan_html(plan: dict) -> str:
-    """Bloque "Plan de entregas": qué días recibir combustible y cuánto."""
-    if not plan["entregas"]:
+def corregir_negativo(valor: float | None) -> int | None:
+    """Al salir de un campo del tanque: negativo → 0, pero vacío sigue vacío.
+
+    Vacío no se convierte en 0 porque los dos campos son obligatorios: un campo
+    vacío tiene que seguir mostrándose vacío y mantener el botón deshabilitado.
+    """
+    return None if valor is None else galones_validos(valor)
+
+
+def _sin_anio(d: date) -> str:
+    """2026-11-01 → "1 de noviembre" (para no repetir el año en un mismo texto)."""
+    return fecha_larga(d).rsplit(" de ", 1)[0]
+
+
+def _hora_en_palabras(hora) -> str:
+    """15:00 → "las 3 de la tarde"; 9:00 → "las 9 de la mañana"."""
+    momento = "de la tarde" if hora.hour >= 12 else "de la mañana"
+    return f"las {hora.hour % 12 or 12} {momento}"
+
+
+def _plan_html(plan: dict, ahora: datetime) -> str:
+    """Bloque "Plan de entregas": solo qué día pedir y cuántos galones.
+
+    El día en que el pedido queda disponible está en la tabla de detalle, para no
+    recargar el resumen.
+    """
+    if not plan["entregas"] and not plan["alertas"]:
         cuerpo = (
-            '<div class="msg-cuerpo">Con el stock actual alcanza para todo el rango: '
-            "<b>no hace falta pedir</b>.</div>"
+            '<div class="msg-cuerpo"><b>No hace falta pedir:</b> el stock actual '
+            "alcanza para todo el rango.</div>"
         )
     else:
         items = "".join(
-            f"<li><b>{fecha_larga(e['fecha'])}</b>: recibir "
-            f"<b>{e['entrega']:,.0f} galones</b> (el tanque tendría "
-            f"{e['stock_al_abrir']:,.0f} al abrir)</li>"
+            f"<li>Pedir <b>{e['entrega']:,.0f} gal.</b> el "
+            f"<b>{DIAS_SEMANA[e['pagar_antes_de'].weekday()]} "
+            f"{_sin_anio(e['pagar_antes_de'].date())}</b></li>"
             for e in plan["entregas"]
         )
-        cuerpo = (
-            f'<div class="cifra">{plan["total_pedido"]:,.0f}'
-            f'<span class="unidad">galones en {len(plan["entregas"])} '
-            "entrega(s)</span></div>"
-            f'<ul class="msg-detalle">{items}</ul>'
+        cuerpo = f'<ul class="msg-detalle">{items}</ul>' if items else ""
+
+    # Fuera del if/else: puede faltar combustible aunque ya no se alcance a pedir.
+    if plan["alertas"]:
+        dias_mal = ", ".join(_sin_anio(d["fecha"]) for d in plan["alertas"])
+        llegada = ReglasPedido().hora_llegada(ahora)
+        cuerpo += (
+            f'<div class="msg-pie"><b>Atención:</b> para el {dias_mal} ya pasó la hora '
+            "de pago. Contactar con el proveedor lo antes posible </div>"
         )
+
     return (
         '<div class="pedido">'
-        '<div class="pedido-titulo"><i class="bi bi-truck"></i> Plan de entregas</div>'
-        f"{cuerpo}"
-        '<div class="msg-pie">Cada entrega llena el tanque hasta '
-        f"{plan['tope']:,.0f} galones y llega antes de abrir; si el proveedor demora, "
-        "llámalo con anticipación. Al final del rango quedarían "
-        f"{plan['stock_final']:,.0f} galones en el tanque.</div>"
-        "</div>"
+            '<div class="pedido-titulo"><i class="bi bi-truck"></i> Plan de entregas</div>'
+            f"{cuerpo}"
+        '</div>'
     )
+
+
+def _hoja_pedidos(plan: dict | None, error_plan: str) -> pd.DataFrame:
+    """Hoja "Pedidos": lo que el administrador tiene que hacer, un pedido por fila.
+
+    Es lo más útil del reporte (cuándo pagar y cuánto), por eso va primera. Los días
+    cuya hora de pago ya pasó también aparecen, para que llame al proveedor.
+    """
+    if plan is None:
+        return pd.DataFrame({"Aviso": [f"No se pudo armar el plan de entregas: {error_plan}"]})
+
+    filas = [
+        {
+            "Pagar el pedido": fecha_larga(e["pagar_antes_de"].date()),
+            "Hasta las": f"{e['pagar_antes_de']:%H:%M}",
+            "Galones a pedir": round(e["entrega"]),
+            "Disponible desde": fecha_larga(e["fecha"]),
+        }
+        for e in plan["entregas"]
+    ]
+    filas += [
+        {
+            "Pagar el pedido": "Ya pasó la hora de pago: llamar al proveedor hoy",
+            "Hasta las": "—",
+            "Galones a pedir": None,
+            "Disponible desde": fecha_larga(d["fecha"]),
+        }
+        for d in plan["alertas"]
+    ]
+    if not filas:
+        return pd.DataFrame(
+            {"Aviso": ["No hace falta pedir: el stock actual alcanza para todo el rango."]}
+        )
+    return pd.DataFrame(filas)
+
+
+def _reporte_excel(
+    r: dict,
+    total: float,
+    stock: int,
+    capacidad: int,
+    margen: float,
+    plan: dict | None,
+    error_plan: str,
+    detalle: pd.DataFrame,
+) -> str:
+    """Guarda el resultado del rango en un .xlsx y devuelve su ruta.
+
+    Tres hojas: "Pedidos" (cuándo pagar y cuántos galones), "Resumen" (las cifras
+    del recuadro verde) y "Detalle" (la misma tabla que se ve en pantalla). Cada
+    archivo va en su propia carpeta temporal para que dos usuarios prediciendo a la
+    vez no se pisen el archivo.
+    """
+    resumen = pd.DataFrame(
+        {
+            "Concepto": [
+                "Producto",
+                "Fecha de inicio",
+                "Días predichos",
+                "Total a pedir (galones)",
+                "Pedidos (un camión cada uno)",
+                "Capacidad del camión (galones)",
+                "Venta estimada en el rango (galones)",
+                "Venta promedio por día (galones)",
+                "Margen de error por día (± galones)",
+                "Galones en el tanque al inicio",
+                "Capacidad del tanque (galones)",
+                "Precio considerado (S/ por galón)",
+                "Ventas cargadas hasta",
+                "Reporte generado",
+            ],
+            "Valor": [
+                r["producto"],
+                fecha_larga(r["fecha_inicio"]),
+                r["dias"],
+                round(plan["total_pedido"]) if plan else "—",
+                len(plan["entregas"]) if plan else "—",
+                capacidad_cisterna(r["producto"]),
+                round(total),
+                round(total / r["dias"]),
+                round(margen),
+                stock,
+                capacidad,
+                round(r["precio_referencia"], 2),
+                fecha_larga(r["ultimo_dia_real"]),
+                datetime.now().strftime("%d/%m/%Y %H:%M"),
+            ],
+        }
+    )
+
+    nombre = f"prediccion_{r['producto']}_{r['fecha_inicio']}_{r['dias']}dias.xlsx"
+    ruta = Path(tempfile.mkdtemp()) / nombre
+    hojas = (
+        ("Pedidos", _hoja_pedidos(plan, error_plan)),
+        ("Resumen", resumen),
+        ("Detalle", detalle),
+    )
+    with pd.ExcelWriter(ruta) as excel:
+        for hoja, df in hojas:
+            df.to_excel(excel, sheet_name=hoja, index=False)
+            # Ancho de cada columna según su texto más largo, para que se lea al abrir.
+            ws = excel.sheets[hoja]
+            for i, col in enumerate(df.columns):
+                largo = max([len(str(col)), *df[col].astype(str).str.len()])
+                ws.column_dimensions[chr(65 + i)].width = largo + 2
+    return str(ruta)
 
 
 def predecir_rango_ui(
@@ -286,13 +478,19 @@ def predecir_rango_ui(
     fecha_inicio_str: str,
     dias: int,
     stock: float | None,
-    capacidad: float | None,
-    llenado_max: float,
-    stock_minimo: float | None,
+    capacidad: float | None
 ):
+    # Datos del tanque imposibles: se corta ANTES de predecir. No tiene sentido
+    # mostrar un pronóstico ni una tabla armados sobre un tanque que no existe.
+    try:
+        validar_tanque(producto, galones_validos(stock), galones_validos(capacidad))
+    except PlanImposible as e:
+        error = error_html("Revisa los datos del tanque", str(e))
+        return None, error, None, gr.update(value=None, visible=False)
+
     r, error = _ejecutar(predecir_rango, producto, fecha_inicio_str, int(dias))
     if error:
-        return None, error, None
+        return None, error, None, gr.update(value=None, visible=False)
 
     tabla = pd.DataFrame(r["predicciones"])[["fecha", "prediccion_galones"]]
     tabla["fecha"] = tabla["fecha"].astype(str)
@@ -300,60 +498,123 @@ def predecir_rango_ui(
     total = float(tabla["galones"].sum())
     stock = galones_validos(stock)
 
+    # Margen ± en galones por día (prueba de septiembre). Mínimo y máximo de cada día;
+    # el mínimo no baja de 0 porque no existen ventas negativas.
+    margen = margen_error_galones(r["producto"])
+    tabla["mínimo"] = (tabla["galones"] - margen).clip(lower=0)
+    tabla["máximo"] = tabla["galones"] + margen
+    promedio = total / len(tabla)
+
     # Sin capacidad: un solo pedido (venta − stock). Con capacidad: plan de entregas
     # día por día, porque puede que todo lo necesario no quepa de una vez.
+    # El plan usa la venta ESTIMADA, sin sumarle el margen: el modelo ya tiende a
+    # sobrestimar y la reserva mínima del tanque (entregas.py) cubre los días en que
+    # se vende más. Sumar además el margen inflaría los pedidos.
     plan = None
+    error_plan = ""
+    ahora = datetime.now()
     if galones_validos(capacidad) > 0:
         try:
             plan = planificar_entregas(
+                r["producto"],
                 [(p["fecha"], p["prediccion_galones"]) for p in r["predicciones"]],
                 stock_inicial=stock,
                 capacidad=galones_validos(capacidad),
-                llenado_max_pct=llenado_max,
-                stock_minimo=galones_validos(stock_minimo),
+                ahora=ahora,
             )
-            bloque_pedido = _plan_html(plan)
+            bloque_pedido = _plan_html(plan, ahora)
         except PlanImposible as e:
+            error_plan = str(e)
+            pie = f'<div class="msg-pie">{e.detalle}</div>' if e.detalle else ""
             bloque_pedido = (
                 '<div class="pedido"><div class="pedido-titulo">'
                 '<i class="bi bi-exclamation-triangle"></i> No se pudo armar el plan '
-                f'de entregas</div><div class="msg-cuerpo">{e}</div></div>'
+                f'de entregas</div><div class="msg-cuerpo">{e}</div>{pie}</div>'
             )
     else:
         bloque_pedido = _pedido_html(total, stock, r["producto"])
 
+    # Solo lo que el administrador usa para decidir: qué pedir y cuándo, y tres datos
+    # de contexto. Los totales y promedios quedan en la tabla de detalle y el Excel.
     cuerpo = (
-        f'<div class="cifra">{total:,.0f}'
-        '<span class="unidad">galones en total</span></div>'
-        '<ul class="msg-detalle">'
-        f"<li><b>Promedio por día:</b> {total / len(tabla):,.0f} galones</li>"
-        f"{_items_contexto(r)}"
-        "</ul>"
         f"{bloque_pedido}"
+        '<div class="msg-cuerpo"><b>Información</b></div>'
+        '<ul class="msg-detalle">'
+        f"<li>Realizar los pedidos antes de "
+        f"{_hora_en_palabras(ReglasPedido().hora_limite_pago)}.</li>"
+        f"<li>Cada pedido es como máximo un camión de "
+        f"{capacidad_cisterna(r['producto']):,.0f} galones"
+        f"{'' if r['producto'] == 'GLP' else ' (puede compartirlo con otros combustibles)'}"
+        ".</li>"
+        f"<li>Precio considerado: S/ {r['precio_referencia']:.2f} por galón</li>"
+        f"<li>Margen de error: ± {margen:,.0f} galones por día</li>"
+        "</ul>"
     ) + notas_html(r["notas"])
 
+    inicio = date.fromisoformat(str(r["fecha_inicio"]))
+    fin = inicio + timedelta(days=r["dias"] - 1)
+    desde = _sin_anio(inicio) if inicio.year == fin.year else fecha_larga(inicio)
     resumen = banner(
         "ok",
         "calendar-range",
-        f"{r['producto']} — {r['dias']} días desde el {fecha_larga(r['fecha_inicio'])}",
+        f"{r['producto']} — {r['dias']} días, del {desde} al {fecha_larga(fin)}",
         cuerpo,
     )
 
-    # El gráfico necesita la fecha ISO para ordenar el eje; la tabla la muestra larga.
+    # Gráfico: tres líneas (estimado, mínimo, máximo). Necesita la fecha ISO para
+    # ordenar el eje; la tabla la muestra larga.
+    grafico = tabla.rename(columns={"galones": "estimado"}).melt(
+        id_vars="fecha", var_name="serie", value_name="galones"
+    )
+
+    ventas = pd.DataFrame(
+        {
+            "Fecha": tabla["fecha"].map(fecha_larga),
+            "Demanda estimada (gal)": tabla["galones"].round(),
+            "Mínimo (gal)": tabla["mínimo"].round(),
+            "Máximo (gal)": tabla["máximo"].round(),
+        }
+    )
     if plan:
-        # Con plan, el detalle muestra cómo se mueve el tanque cada día.
-        detalle = pd.DataFrame(
+        # Con plan, el detalle muestra además cómo se mueve el tanque cada día, en el
+        # orden en que se lee: stock inicial + pedido − demanda = stock final.
+        # "Pedido" son los galones que llegan ese día (ya están al abrir); qué día
+        # pagarlos lo dice el plan de entregas del resumen.
+        dias = plan["dias"]
+        detalle_excel = pd.DataFrame(
             {
-                "fecha": [fecha_larga(d["fecha"]) for d in plan["dias"]],
-                "stock al abrir": [round(d["stock_al_abrir"]) for d in plan["dias"]],
-                "entrega": [round(d["entrega"]) for d in plan["dias"]],
-                "venta estimada": [round(d["venta"]) for d in plan["dias"]],
-                "stock al cerrar": [round(d["stock_al_cerrar"]) for d in plan["dias"]],
+                "Fecha": ventas["Fecha"],
+                "Stock inicial (gal)": [round(d["stock_al_abrir"]) for d in dias],
+                "Pedido (gal)": [round(d["entrega"]) or None for d in dias],
+                "Demanda estimada (gal)": ventas["Demanda estimada (gal)"],
+                "Mínimo (gal)": ventas["Mínimo (gal)"],
+                "Máximo (gal)": ventas["Máximo (gal)"],
+                "Stock final (gal)": [round(d["stock_al_cerrar"]) for d in dias],
+            }
+        )
+        # En pantalla el pedido va como "+2,421" (se suma al tanque); en el Excel
+        # queda como número para poder sumarlo.
+        detalle = detalle_excel.assign(
+            **{
+                "Pedido (gal)": [
+                    f"+{d['entrega']:,.0f}" if d["entrega"] > 0 else "" for d in dias
+                ]
             }
         )
     else:
-        detalle = tabla.assign(fecha=tabla["fecha"].map(fecha_larga))
-    return tabla, resumen, detalle
+        detalle = detalle_excel = ventas
+
+    excel = _reporte_excel(
+        r,
+        total,
+        stock,
+        galones_validos(capacidad),
+        margen,
+        plan,
+        error_plan,
+        detalle_excel,
+    )
+    return grafico, resumen, detalle, gr.update(value=excel, visible=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -382,6 +643,25 @@ def fin_carga_xlsx():
     )
 
 
+def info_carga_md() -> str:
+    """Texto de la pestaña de carga con el último día registrado (al abrir y tras subir)."""
+    try:
+        db = SessionLocal()
+        try:
+            ultimo = ultimo_dia_registrado(db)
+        finally:
+            db.close()
+    except Exception:
+        ultimo = None
+    texto = fecha_larga(ultimo) if ultimo else "todavía no hay ventas cargadas"
+    return (
+        "Sube el **reporte mensual de ventas** (`.xlsx`) que exporta el sistema "
+        "del grifo.  \n"
+        f"Último día registrado: **{texto}**\n\n"
+        "Puedes subir varios meses a la vez."
+    )
+
+
 def cargar_xlsx_ui(archivos, progress=gr.Progress()):
     """Carga uno o varios reportes mensuales .xlsx en el historial del modelo."""
     if not archivos:
@@ -397,26 +677,46 @@ def cargar_xlsx_ui(archivos, progress=gr.Progress()):
     lineas = []
     total = 0
     con_error = 0
+
+    def _error(nombre, mensaje):
+        lineas.append(
+            f'<li><span class="ico-err">✕</span> <b>{nombre}</b>: {mensaje}</li>'
+        )
+
+    # Paso 1: leer todos los archivos (sin tocar la base). Cada reporte debe empezar
+    # el día siguiente al último registrado, así que hay que guardarlos en orden de
+    # fechas. El nombre o la ruta temporal que entrega Gradio no lo garantizan: se
+    # ordena por la primera fecha real de cada archivo.
+    leidos = []  # (fecha_inicio, nombre, df)
+    for ruta in progress.tqdm(archivos, desc="Leyendo"):
+        nombre = str(ruta).replace("\\", "/").split("/")[-1]
+        try:
+            with open(ruta, "rb") as f:
+                df = leer_reporte(f.read())
+        except (ArchivoInvalido, ValueError) as e:
+            con_error += 1
+            _error(nombre, e)
+            continue
+        except Exception as e:  # noqa: BLE001 - se reporta por archivo
+            con_error += 1
+            _error(nombre, f"error inesperado: {e}")
+            continue
+        leidos.append((df["fecha"].min(), nombre, df))
+    leidos.sort(key=lambda x: x[0])
+
+    # Paso 2: guardar en orden cronológico.
     try:
-        # Ordenados por nombre para que los meses entren en orden cronológico: el
-        # arrastre de precio de los días sin ventas depende del mes anterior.
-        for ruta in progress.tqdm(sorted(archivos, key=str), desc="Procesando"):
-            nombre = str(ruta).replace("\\", "/").split("/")[-1]
+        for _, nombre, df in progress.tqdm(leidos, desc="Guardando"):
             try:
-                with open(ruta, "rb") as f:
-                    r = ingerir_ventas_mensuales(db, f.read())
+                r = guardar_reporte(db, df)
             except (ArchivoInvalido, ValueError) as e:
                 con_error += 1
-                lineas.append(
-                    f'<li><span class="ico-err">✕</span> <b>{nombre}</b>: {e}</li>'
-                )
+                _error(nombre, e)
                 continue
             except Exception as e:  # noqa: BLE001 - se reporta por archivo
+                db.rollback()
                 con_error += 1
-                lineas.append(
-                    f'<li><span class="ico-err">✕</span> <b>{nombre}</b>: '
-                    f"error inesperado: {e}</li>"
-                )
+                _error(nombre, f"error inesperado: {e}")
                 continue
 
             total += r["filas_guardadas"]
@@ -469,29 +769,20 @@ def _ventas_promedio(productos: list[str], hasta: date) -> dict:
 
 
 def cargar_metricas_ui():
-    """Métricas explicadas para alguien que no es estadístico.
+    """Tabla de error del modelo por producto, al lado de su venta diaria.
 
     Un error de 138 galones suena enorme si no se sabe cuánto se vende: por eso cada
-    error va al lado de la venta diaria del producto y en %. Y en vez de "MAPE" o
-    "MASE" se compara con lo que haría una persona sin modelo: pedir lo mismo que se
-    vendió el mismo día de la semana pasada.
+    error va al lado de la venta diaria del producto y en %. La mejora se mide contra
+    lo que haría una persona sin modelo: pedir lo mismo que se vendió el mismo día de
+    la semana pasada.
     """
     m = metricas_modelo()
     entrenado = date.fromisoformat(m["fecha_entrenamiento"])
     ventas = _ventas_promedio([f["producto"] for f in m["metricas"]], entrenado)
 
-    filas_html = ""
     filas_tabla = []
     for f in m["metricas"]:
         venta = ventas.get(f["producto"])
-        escala = f" de unos {venta:,.0f} que se venden" if venta else ""
-        filas_html += (
-            f"<li><b>{f['producto']}</b>: se equivoca en promedio "
-            f"{f['error_medio_galones']:,.0f} galones al día{escala} "
-            f"(≈ {f['mape']:.0f} de cada 100 galones). Se equivoca "
-            f"<b>{f['mejora_vs_simple_pct']:.0f} % menos</b> que repetir la venta de "
-            "la semana pasada.</li>"
-        )
         filas_tabla.append(
             {
                 "Producto": f["producto"],
@@ -501,131 +792,65 @@ def cargar_metricas_ui():
                 "Mejora vs. método simple (%)": f["mejora_vs_simple_pct"],
             }
         )
+    return pd.DataFrame(filas_tabla)
 
-    cuerpo = (
-        '<div class="msg-cuerpo">Se le pidió al modelo predecir <b>90 días cuyas '
-        "ventas reales ya se conocían</b> (sin mostrárselas) y luego se comparó día "
-        "por día lo que dijo con lo que de verdad se vendió:</div>"
-        f'<ul class="msg-detalle">{filas_html}</ul>'
-        '<div class="msg-pie"><b>Error medio</b>: cuánto se aleja la predicción de '
-        "la venta real en un día cualquiera; unos días se pasa y otros se queda "
-        "corto. · <b>Método simple</b>: pedir lo mismo que se vendió el mismo día de "
-        "la semana pasada, que es lo que se haría sin el sistema.</div>"
-    )
-    titulo = "¿Qué tan bien predice el modelo?"
-    return banner("info", "bar-chart", titulo, cuerpo), pd.DataFrame(filas_tabla)
+
+def comparacion_ui(producto: str, desde: str | None, hasta: str | None):
+    """Real vs. predicho de septiembre, filtrado por producto y fechas."""
+    d = date.fromisoformat(desde[:10]) if desde else date(2026, 9, 1)
+    h = date.fromisoformat(hasta[:10]) if hasta else date(2026, 9, 30)
+    t = verificacion_ultimo_mes(producto, d, h)
+
+    grafico = t.melt(id_vars="fecha", value_vars=["real", "predicho"],
+                     var_name="serie", value_name="galones")
+    tabla = pd.DataFrame({
+        "Fecha": t["fecha"].dt.strftime("%d/%m/%Y"),
+        "Real (gal)": t["real"].round(0),
+        "Predicho (gal)": t["predicho"].round(0),
+        "Diferencia (gal)": t["real_menos_predicho"].round(0),
+        "Diferencia (%)": t["error_pct"].round(1),
+    })
+    return grafico, tabla
 
 
 with gr.Blocks(title="Inicio") as demo:
     gr.HTML(ENCABEZADO_HTML, js_on_load=ENCABEZADO_JS_ON_LOAD)
 
     with gr.Tabs() as pestanas:
-        # ---------------- Predicción diaria ----------------
-        with gr.Tab("Predicción diaria", id="diaria"):
-            p_aviso = gr.HTML(js_on_load=IR_CARGA_JS)
-            gr.Markdown(
-                "Elige un producto y una fecha para estimar los galones que se "
-                "venderán."
-            )
-            gr.Markdown(
-                f"Se puede elegir desde hoy hasta {MAX_HORIZONTE_DIAS} días después "
-                "del último día con ventas cargadas. La fecha propuesta es el día "
-                "siguiente a ese registro.",
-                elem_classes="ayuda",
-            )
-            with gr.Row(equal_height=True):
-                p_producto = gr.Dropdown(PRODUCTOS, value="REGULAR", label="Producto")
-                p_fecha = calendario("Fecha")
-            p_boton = gr.Button(
-                "Predecir", variant="primary", size="lg", interactive=False
-            )
-            p_resultado = gr.HTML(js_on_load=IR_CARGA_JS)
-
-            p_producto.change(
-                limites_fecha, inputs=p_producto, outputs=[p_fecha, p_aviso, p_boton]
-            )
-            # Sin fecha elegida no se puede predecir.
-            p_fecha.change(
-                lambda f: gr.update(interactive=bool(f)),
-                inputs=p_fecha,
-                outputs=p_boton,
-                show_progress="hidden",
-            )
-            (
-                p_boton.click(
-                    lambda: bloquear_boton("Prediciendo…"),
-                    outputs=p_boton,
-                    show_progress="hidden",
-                )
-                .then(
-                    predecir_ui,
-                    inputs=[p_producto, p_fecha],
-                    outputs=p_resultado,
-                    show_progress="full",
-                )
-                .then(
-                    lambda: gr.update(value="Predecir", interactive=True),
-                    outputs=p_boton,
-                    show_progress="hidden",
-                )
-            )
+        
 
         # ---------------- Predicción de rango ----------------
-        with gr.Tab("Predicción de rango", id="rango"):
-            r_aviso = gr.HTML(js_on_load=IR_CARGA_JS)
-            gr.Markdown(
-                "Elige un producto, una fecha de inicio y cuántos días quieres "
-                "estimar."
-            )
-            gr.Markdown(
-                "Como el reporte de ventas llega una vez al mes, la proyección "
-                f"alcanza hasta {MAX_HORIZONTE_DIAS} días después del último día "
-                "con ventas cargadas.",
-                elem_classes="ayuda",
-            )
+        with gr.Tab("Predicción", id="rango"):
+            # Clase "aviso-vacio-oculto" (estilos.css): sin aviso no ocupa espacio.
+            r_aviso = gr.HTML(js_on_load=IR_CARGA_JS, elem_classes="aviso-vacio-oculto")
+            
+            
             with gr.Row(equal_height=True):
-                r_producto = gr.Dropdown(PRODUCTOS, value="REGULAR", label="Producto")
-                r_fecha = calendario("Fecha de inicio")
+                r_producto = gr.Dropdown(PRODUCTOS, value="REGULAR", label="Combustible", info="Seleccione un combustible")
+                r_fecha = calendario("Seleccione la fecha de inicio")
                 r_dias = gr.Slider(
-                    1, MAX_HORIZONTE_DIAS, value=7, step=1, label="Días a predecir"
+                    1, MAX_HORIZONTE_DIAS, value=7, step=1, label="Cantidad de días a predecir"
                 )
-            # Opcional: con el stock, el resumen dice cuánto pedir (venta − stock);
-            # si además se indica la capacidad, arma un plan de entregas día por día.
+            # Obligatorios: con los dos, el resumen arma el plan de entregas día por
+            # día. Empiezan vacíos y "Predecir rango" sigue deshabilitado hasta que
+            # se llenen (ver `_datos_completos`).
             # Sin `minimum=0` a propósito: con él, Gradio deja escribir -5 igual y
             # recién al predecir lanza un error en inglés. En su lugar, al salir del
-            # campo (blur) un negativo o vacío se corrige a 0 a la vista del usuario.
-            with gr.Accordion("Tanque y pedido (opcional)", open=True):
-                with gr.Row(equal_height=True):
-                    r_stock = gr.Number(
-                        value=0,
-                        precision=0,
-                        label="Stock al inicio del rango (galones)",
-                        info="Lo que hay en el tanque el primer día del rango.",
-                    )
-                    r_capacidad = gr.Number(
-                        value=0,
-                        precision=0,
-                        label="Capacidad del tanque (galones)",
-                        info="Si la dejas en 0, se sugiere un solo pedido.",
-                    )
-                    r_llenado = gr.Slider(
-                        80,
-                        100,
-                        value=95,
-                        step=1,
-                        label="Llenado máximo (%)",
-                        info="Los tanques no se llenan al 100 %: el combustible se "
-                        "dilata (GLP ≈ 85 %).",
-                    )
-                    r_minimo = gr.Number(
-                        value=0,
-                        precision=0,
-                        label="Stock mínimo (galones)",
-                        info="Reserva que nunca se toca: cubre errores y demoras.",
-                    )
-            for campo in (r_stock, r_capacidad, r_minimo):
+            # campo (blur) un negativo se corrige a 0 a la vista del usuario.
+            with gr.Row(equal_height=True):
+                r_stock = gr.Number(
+                    value=None,
+                    precision=0,
+                    label="Galones actuales en el tanque",
+                )
+                r_capacidad = gr.Number(
+                    value=None,
+                    precision=0,
+                    label="Capacidad del tanque (galones)",
+                )
+            for campo in (r_stock, r_capacidad):
                 campo.blur(
-                    galones_validos,
+                    corregir_negativo,
                     inputs=campo,
                     outputs=campo,
                     show_progress="hidden",
@@ -635,19 +860,42 @@ with gr.Blocks(title="Inicio") as demo:
             )
             r_resumen = gr.HTML(js_on_load=IR_CARGA_JS)
             r_grafico = gr.LinePlot(
-                x="fecha", y="galones", label="Predicción (galones/día)"
+                x="fecha",
+                y="galones",
+                color="serie",  # estimado, mínimo y máximo
+                label="Predicción (galones/día)",
             )
             r_tabla = gr.Dataframe(label="Detalle")
+            # Oculto hasta la primera predicción: antes no hay nada que descargar.
+            r_excel = gr.DownloadButton(
+                "Descargar reporte en Excel",
+                variant="secondary",
+                visible=False,
+                elem_classes="boton-excel",
+            )
 
             r_producto.change(
                 limites_fecha, inputs=r_producto, outputs=[r_fecha, r_aviso, r_boton]
             )
             r_fecha.change(
                 ajustar_rango,
-                inputs=[r_producto, r_fecha, r_dias],
+                inputs=[r_producto, r_fecha, r_dias, r_stock, r_capacidad],
                 outputs=[r_boton, r_dias],
                 show_progress="hidden",
             )
+            r_dias.change(
+                actualizar_hasta,
+                inputs=[r_fecha, r_dias],
+                outputs=r_dias,
+                show_progress="hidden",
+            )
+            for campo in (r_stock, r_capacidad):
+                campo.change(
+                    estado_boton,
+                    inputs=[r_fecha, r_stock, r_capacidad],
+                    outputs=r_boton,
+                    show_progress="hidden",
+                )
             (
                 r_boton.click(
                     lambda: bloquear_boton("Prediciendo…"),
@@ -662,14 +910,16 @@ with gr.Blocks(title="Inicio") as demo:
                         r_dias,
                         r_stock,
                         r_capacidad,
-                        r_llenado,
-                        r_minimo,
                     ],
-                    outputs=[r_grafico, r_resumen, r_tabla],
+                    outputs=[r_grafico, r_resumen, r_tabla, r_excel],
                     show_progress="full",
                 )
                 .then(
-                    lambda: gr.update(value="Predecir rango", interactive=True),
+                    lambda f, s, c: gr.update(
+                        value="Predecir rango",
+                        interactive=_datos_completos(f, s, c),
+                    ),
+                    inputs=[r_fecha, r_stock, r_capacidad],
                     outputs=r_boton,
                     show_progress="hidden",
                 )
@@ -677,13 +927,7 @@ with gr.Blocks(title="Inicio") as demo:
 
         # ---------------- Carga del reporte mensual ----------------
         with gr.Tab("Cargar ventas mensuales", id="carga"):
-            gr.Markdown(
-                "Sube el **reporte mensual de ventas** (`.xlsx`) que exporta el sistema "
-                "del grifo. Se agregan las transacciones a nivel día × producto y se "
-                "guardan en el historial que alimenta al modelo.\n\n"
-                "Puedes subir varios meses a la vez. La carga es **idempotente**: "
-                "volver a subir un mes ya cargado lo actualiza, no lo duplica."
-            )
+            v_info = gr.Markdown()  # se llena con info_carga_md (al abrir y tras subir)
             v_xlsx = gr.File(
                 label="Reportes de ventas (.xlsx)",
                 file_types=[".xlsx", ".xls"],
@@ -719,32 +963,48 @@ with gr.Blocks(title="Inicio") as demo:
                 )
                 .then(
                     limites_fecha,
-                    inputs=p_producto,
-                    outputs=[p_fecha, p_aviso, p_boton],
-                    show_progress="hidden",
-                )
-                .then(
-                    limites_fecha,
                     inputs=r_producto,
                     outputs=[r_fecha, r_aviso, r_boton],
                     show_progress="hidden",
                 )
+                .then(info_carga_md, outputs=v_info, show_progress="hidden")
             )
 
         # ---------------- Métricas ----------------
         with gr.Tab("Métricas del modelo", id="metricas"):
-            m_texto = gr.HTML()
+            gr.Markdown(
+                "### Real vs. predicho (septiembre 2026)\n"
+                "Prueba del método: el modelo se entrenó hasta el 31/08 y predijo "
+                "septiembre sin ver las ventas reales."
+            )
+            with gr.Row(equal_height=True):
+                c_producto = gr.Dropdown(PRODUCTOS, value="REGULAR", label="Producto")
+                c_desde = gr.DateTime(value="2026-09-01", include_time=False,
+                                      type="string", label="Desde")
+                c_hasta = gr.DateTime(value="2026-09-30", include_time=False,
+                                      type="string", label="Hasta")
+            
+            c_grafico = gr.LinePlot(x="fecha", y="galones", color="serie",
+                                    label="Real vs. predicho (galones/día)")
+
+            c_tabla = gr.Dataframe(label="Detalle día por día")
+
+            for comp in (c_producto, c_desde, c_hasta):
+                comp.change(comparacion_ui, inputs=[c_producto, c_desde, c_hasta],
+                            outputs=[c_grafico, c_tabla])
+
             m_tabla = gr.Dataframe(label="Detalle por producto")
             m_boton = gr.Button("Actualizar métricas")
-            m_boton.click(cargar_metricas_ui, outputs=[m_texto, m_tabla])
+            m_boton.click(cargar_metricas_ui, outputs=m_tabla)
 
-    # Al abrir la página: métricas y límites de los dos calendarios (calculados en
+    # Al abrir la página: métricas y límites del calendario de rango (calculados en
     # cada visita, no al arrancar el servidor, para que "hoy" sea siempre hoy).
-    demo.load(cargar_metricas_ui, outputs=[m_texto, m_tabla])
-    demo.load(limites_fecha, inputs=p_producto, outputs=[p_fecha, p_aviso, p_boton])
+    demo.load(cargar_metricas_ui, outputs=m_tabla)
+    demo.load(info_carga_md, outputs=v_info)
     demo.load(limites_fecha, inputs=r_producto, outputs=[r_fecha, r_aviso, r_boton])
+    demo.load(comparacion_ui, inputs=[c_producto, c_desde, c_hasta], outputs=[c_grafico, c_tabla])
 
     # Botón "Cargar ventas" de los avisos y errores → pestaña de carga, sin salir de
     # la página.
-    for html in (p_aviso, p_resultado, r_aviso, r_resumen):
+    for html in (r_aviso, r_resumen):
         html.ir_carga(ir_a_carga, outputs=pestanas)

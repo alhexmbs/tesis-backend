@@ -23,7 +23,7 @@ Un solo proceso FastAPI sirve dos cosas:
 |---|---|
 | **Predicción diaria** | Galones estimados para un producto y una fecha (desde hoy hasta 15 días después del último día con ventas cargadas). |
 | **Predicción de rango** | Galones día por día para 1–15 días, con gráfico. Con el stock y la capacidad del tanque arma un **plan de entregas**: qué días recibir combustible y cuánto. |
-| **Cargar ventas mensuales** | Sube uno o varios reportes `.xlsx` del sistema del grifo y los agrega al historial (idempotente: volver a subir un mes lo actualiza, no lo duplica). |
+| **Cargar ventas mensuales** | Sube uno o varios reportes `.xlsx` del sistema del grifo y los agrega al historial (un archivo con fechas ya registradas se rechaza entero: las ventas cargadas no se sobrescriben; tampoco se acepta un mes que deje días vacíos tras el último registrado). Muestra el último día registrado. |
 | **Métricas del modelo** | Error medio en galones y en %, junto a la venta diaria del producto, y cuánto mejora frente al método simple de repetir la venta de la semana pasada. |
 
 ## Cómo predice el modelo

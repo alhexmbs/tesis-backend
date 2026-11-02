@@ -13,3 +13,7 @@ exportar_datos.py
 
 .pytest_cache
 .gradio
+
+/notebooks
+/app/syntax
+/reportes

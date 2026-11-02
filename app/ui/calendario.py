@@ -35,7 +35,6 @@ CALENDARIO_TEMPLATE = """
   <div class="campo-fecha-fila">
     <i class="bi bi-calendar3 campo-fecha-icono"></i>
     <input class="campo-fecha-input" type="text" placeholder="Elige una fecha">
-    <button type="button" class="boton-manana">Mañana</button>
   </div>
 </div>
 """

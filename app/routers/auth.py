@@ -34,6 +34,7 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
             request.dni,
             request.nro_celular,
             request.username,
+            request.email,
             request.password,
             db,
         )
@@ -55,6 +56,12 @@ async def register(request: RegisterRequest, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="El número de celular ya ha sido registrado.",
+        )
+
+    if user == 4:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="El correo ya ha sido registrado.",
         )
 
     return user

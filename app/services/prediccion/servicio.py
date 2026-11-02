@@ -32,7 +32,7 @@ import joblib
 import pandas as pd
 from sqlalchemy.orm import Session
 
-from app.core.config import CONFIG_SERVICIO_PATH, MODELOS_DIR
+from app.core.config import CONFIG_SERVICIO_PATH, MODELOS_DIR, VERIFICACION_PATH
 from app.models.historial import HistorialVenta
 from app.services.prediccion.clima import obtener_temperatura_max
 from app.services.prediccion.features import (
@@ -166,12 +166,11 @@ def _predecir(art: Artefactos, producto: str, features: dict, base_28: float) ->
 # días sin cargar entre el final del historial y la fecha pedida. Esos días se
 # estiman con el propio modelo, pero solo hasta este horizonte: más allá la
 # proyección deja de ser un apoyo útil para decidir la compra de combustible.
-MAX_HORIZONTE_DIAS = 15
+MAX_HORIZONTE_DIAS = 37  # TEMPORAL para pruebas: el valor real es 15
 
 NOTA_ESTIMACION = (
-    "Las ventas registradas llegan hasta el {ultimo_real}. Para llegar a la fecha "
-    "pedida, el sistema completó {n} día(s) con estimaciones propias. Al cargar el "
-    "reporte de ventas del mes, el resultado se vuelve a calcular con las ventas reales."
+    "Le recomendamos mantener actualizado el registro de ventas para obtener una "
+    "predicción más precisa."
 )
 
 NOTA_HORIZONTE = (
@@ -544,3 +543,22 @@ def metricas_modelo() -> dict:
         "fecha_entrenamiento": art.config["fecha_entrenamiento"],
         "metricas": filas,
     }
+
+def verificacion_ultimo_mes(producto: str, desde: date, hasta: date) -> pd.DataFrame:
+    """Real vs. predicho de septiembre 2026, del notebook de verificación
+    (modelo entrenado hasta el 31/08, septiembre predicho en cadena sin ver ventas reales)."""
+    t = pd.read_csv(VERIFICACION_PATH, parse_dates=["fecha"])
+    t = t[(t["producto"] == producto)
+          & (t["fecha"].dt.date >= desde) & (t["fecha"].dt.date <= hasta)]
+    return t.sort_values("fecha")
+
+def margen_error_galones(producto: str) -> float:
+    """Margen ± en galones por día, sacado de la prueba de septiembre.
+
+    Es el percentil 90 de |real − predicho|: en 27 de los 30 días de la prueba el
+    error fue menor que este número. Se da en galones y no en %, porque el % exagera
+    el error de los combustibles que venden poco (PREMIUM).
+    """
+    t = pd.read_csv(VERIFICACION_PATH)
+    errores = t.loc[t["producto"] == producto, "real_menos_predicho"].abs()
+    return float(errores.quantile(0.9)) if not errores.empty else 0.0

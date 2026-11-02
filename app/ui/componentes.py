@@ -51,7 +51,7 @@ ENCABEZADO_HTML = (
     "<div>"
     '<div class="encabezado-titulo">'
     '<i class="bi bi-fuel-pump"></i> BENZIN AI</div>'
-    '<div class="encabezado-sub">Predicción de demanda de combustible</div>'
+    '<div class="encabezado-sub">Predicción de demanda de combustible vehicular</div>'
     "</div>"
     '<div class="encabezado-derecha">'
     '<span id="fecha-hoy" class="encabezado-fecha"></span>'

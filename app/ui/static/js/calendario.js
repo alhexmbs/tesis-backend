@@ -21,7 +21,6 @@ const es = {
 };
 
 const input = element.querySelector(".campo-fecha-input");
-const botonManana = element.querySelector(".boton-manana");
 
 const calendario = flatpickr(input, {
   locale: es,
@@ -36,23 +35,12 @@ const calendario = flatpickr(input, {
   },
 });
 
-function manana() {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  return calendario.formatDate(d, "Y-m-d");
-}
-
 // Copia al calendario lo que mandó Python: límites y fecha elegida.
 function aplicar() {
   calendario.set("minDate", props.minimo || null);
   calendario.set("maxDate", props.maximo || null);
   calendario.setDate(props.value || null, false); // false: no vuelve a avisar
-  const m = manana();
-  // Las fechas "AAAA-MM-DD" se comparan bien como texto.
-  botonManana.disabled = !(props.minimo && props.minimo <= m && m <= props.maximo);
 }
-
-botonManana.addEventListener("click", () => calendario.setDate(manana(), true));
 
 aplicar();
 watch(["value", "minimo", "maximo"], aplicar);

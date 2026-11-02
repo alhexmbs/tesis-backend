@@ -80,8 +80,9 @@ async def ingestar_ventas(
     db: Annotated[Session, Depends(get_db)],
 ):
     """Carga el reporte mensual de ventas (.xlsx) en el historial que alimenta al
-    modelo. Agrega las transacciones a nivel día x producto y hace upsert, así que
-    volver a subir un mes ya cargado lo actualiza en lugar de duplicarlo."""
+    modelo. Agrega las transacciones a nivel día x producto. Si el archivo trae alguna
+    fecha ya registrada, o no empieza el día siguiente al último registrado (dejaría
+    días vacíos), se rechaza entero (422) y no se guarda nada."""
     if not (archivo.filename or "").lower().endswith((".xlsx", ".xls")):
         raise _error_422(
             ValueError("Solo se aceptan reportes de ventas en formato .xlsx.")

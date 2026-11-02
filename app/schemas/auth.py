@@ -2,6 +2,7 @@ from pydantic import BaseModel, ConfigDict, field_validator
 
 from app.utils.validaciones import (
     validar_dni,
+    validar_email,
     validar_nombre,
     validar_nro_celular,
     validar_username,
@@ -29,6 +30,8 @@ class RegisterRequest(BaseModel):
     dni: str
     nro_celular: str
     username: str
+    # Obligatorio: sin correo el usuario no podría recuperar su contraseña.
+    email: str
     password: str
 
     # Las mismas reglas que aplica `register_service`, adelantadas al parseo del body
@@ -59,6 +62,11 @@ class RegisterRequest(BaseModel):
     def _v_username(cls, v: str) -> str:
         return validar_username(v)
 
+    @field_validator("email")
+    @classmethod
+    def _v_email(cls, v: str) -> str:
+        return validar_email(v)
+
 
 class RegisterResponse(BaseModel):
     id: int
@@ -67,6 +75,7 @@ class RegisterResponse(BaseModel):
     dni: str
     nro_celular: str
     username: str
+    email: str | None
     estado: bool
 
     model_config = ConfigDict(from_attributes=True)

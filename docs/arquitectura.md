@@ -186,9 +186,11 @@ flowchart LR
     end
 
     subgraph L["Load — ingesta.py"]
-        l1["UPSERT por (fecha, producto)<br/>existe → actualiza<br/>no existe → inserta"]
+        l1["¿alguna fecha ya registrada?<br/>sí → rechaza el archivo entero"]
+        l0["¿empieza el día siguiente al último registrado?<br/>no → rechaza el archivo entero (hueco)"]
+        l3["inserta todos los días"]
         l2["db.commit()"]
-        l1 --> l2
+        l1 --> l0 --> l3 --> l2
     end
 
     db[("historial_ventas")]
@@ -201,11 +203,20 @@ flowchart LR
 Entradas al ETL:
 
 - **UI:** pestaña "Cargar ventas mensuales" → `cargar_xlsx_ui` → `ingerir_ventas_mensuales`
-  (archivos ordenados por nombre para que los meses entren en orden).
+  (varios archivos a la vez: primero se leen todos con `leer_reporte`, se ordenan por
+  la primera fecha de su contenido y se guardan en ese orden con `guardar_reporte`;
+  el nombre del archivo no importa).
 - **API:** `POST /api/prediccion/ingesta`.
 
-**Idempotente** = subir el mismo mes dos veces no duplica filas, las actualiza
-(gracias al `UniqueConstraint(fecha, producto)` + el upsert).
+**Sin sobrescritura:** si el archivo trae alguna fecha ya registrada, se rechaza entero
+(`VentasYaRegistradas`) y no se guarda nada. El reporte llega revisado por el área
+contable; una corrección posterior la hace el administrador del sistema. El
+`UniqueConstraint(fecha, producto)` de la tabla es la segunda barrera contra duplicados.
+
+**Sin huecos:** el reporte debe empezar justo el día siguiente al último registrado
+(`HuecoEnHistorial`). Si el historial llega al 30 de septiembre y se sube diciembre, se
+rechaza con "El último día registrado es el 30 de septiembre de 2026. Sube el reporte a
+partir del 1 de octubre de 2026…". La pestaña de carga muestra el último día registrado.
 
 ---
 

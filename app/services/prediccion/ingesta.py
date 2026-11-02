@@ -21,8 +21,10 @@ días, desde lo que ya está guardado en la base. Es el mismo ffill que
 from __future__ import annotations
 
 import logging
+from datetime import date, timedelta
 
 import pandas as pd
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.historial import HistorialVenta
@@ -50,6 +52,44 @@ class ArchivoInvalido(ValueError):
     """El archivo subido no es un reporte de ventas utilizable."""
 
 
+class VentasYaRegistradas(ArchivoInvalido):
+    """El reporte trae fechas que ya están en el historial.
+
+    Las ventas registradas no se sobrescriben desde la carga: el reporte llega ya
+    revisado por el área contable, y una corrección posterior la hace el administrador
+    del sistema. Hereda de ArchivoInvalido para que la UI y el router la muestren
+    como cualquier otro rechazo del archivo.
+    """
+
+
+class HuecoEnHistorial(ArchivoInvalido):
+    """El reporte no empieza el día siguiente al último registrado.
+
+    Si entrara (p. ej. diciembre cuando el historial llega al 30 de septiembre),
+    octubre y noviembre quedarían vacíos y el modelo calcularía rezagos y promedios
+    sobre días que faltan.
+    """
+
+
+_MESES = (
+    "enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
+    "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+)
+
+
+def _fecha_larga(d: date) -> str:
+    return f"{d.day} de {_MESES[d.month - 1]} de {d.year}"
+
+
+def ultimo_dia_registrado(db: Session) -> date | None:
+    """Último día guardado en el historial (de cualquiera de los tres productos)."""
+    return (
+        db.query(func.max(HistorialVenta.fecha))
+        .filter(HistorialVenta.producto.in_(PRODUCTOS_SERVIDOS))
+        .scalar()
+    )
+
+
 def _ultimo_valor_conocido(
     db: Session, producto: str, fecha_limite
 ) -> tuple[float | None, float | None]:
@@ -70,17 +110,11 @@ def _ultimo_valor_conocido(
     )
 
 
-def ingerir_ventas_mensuales(db: Session, contenido: bytes) -> dict:
-    """Procesa un .xlsx de ventas y hace upsert por (fecha, producto).
+def leer_reporte(contenido: bytes) -> pd.DataFrame:
+    """Lee un .xlsx y devuelve su agregado diario x producto (sin tocar la base).
 
-    Es idempotente: subir dos veces el mismo mes actualiza las filas en vez de
-    duplicarlas, y volver a subir un mes ya cargado corrige lo que hubiera cambiado.
-
-    Returns
-    -------
-    dict con ``filas_guardadas``, ``filas_omitidas``, ``fecha_inicio``, ``fecha_fin``,
-    ``productos`` y ``dias_sin_ventas`` (días-producto que el reporte no registró y que
-    se guardaron como cero real, no como hueco).
+    Separado de :func:`guardar_reporte` para que la UI pueda leer varios archivos,
+    ordenarlos por la fecha real de su contenido y guardarlos en orden.
     """
     try:
         transacciones = extraer_excel(contenido)
@@ -95,12 +129,68 @@ def ingerir_ventas_mensuales(db: Session, contenido: bytes) -> dict:
         raise ArchivoInvalido(
             "El archivo no contiene ventas de REGULAR, PREMIUM ni GLP."
         )
+    return df[["fecha", "producto", *COLUMNAS_CRUDAS]].sort_values(
+        ["producto", "fecha"]
+    )
 
-    df = df[["fecha", "producto", *COLUMNAS_CRUDAS]].sort_values(["producto", "fecha"])
+
+def ingerir_ventas_mensuales(db: Session, contenido: bytes) -> dict:
+    """Lee un .xlsx de ventas y guarda sus días en el historial (un solo archivo)."""
+    return guardar_reporte(db, leer_reporte(contenido))
+
+
+def guardar_reporte(db: Session, df: pd.DataFrame) -> dict:
+    """Guarda en el historial el agregado diario de un reporte ya leído.
+
+    Solo agrega días nuevos: si el reporte trae alguna fecha que ya está registrada,
+    se rechaza el archivo completo (``VentasYaRegistradas``) y no se guarda nada.
+    Así un archivo entra entero o no entra, y las ventas ya cargadas no cambian.
+    Además el reporte debe empezar justo el día siguiente al último registrado
+    (``HuecoEnHistorial``): el historial no puede quedar con días vacíos.
+
+    Returns
+    -------
+    dict con ``filas_guardadas``, ``filas_omitidas``, ``fecha_inicio``, ``fecha_fin``,
+    ``productos`` y ``dias_sin_ventas`` (días-producto que el reporte no registró y que
+    se guardaron como cero real, no como hueco).
+    """
     dias_sin_ventas = int((df["n_transacciones_totales"] == 0).sum())
 
     fecha_min = df["fecha"].min().date()
     fecha_max = df["fecha"].max().date()
+
+    # --- Rechazo de fechas ya registradas ---
+    # Se revisa antes de procesar nada: basta un día-producto ya guardado para
+    # rechazar el archivo entero.
+    ya_registradas = (
+        db.query(HistorialVenta.fecha)
+        .filter(
+            HistorialVenta.fecha >= fecha_min,
+            HistorialVenta.fecha <= fecha_max,
+            HistorialVenta.producto.in_(PRODUCTOS_SERVIDOS),
+        )
+        .distinct()
+        .count()
+    )
+    if ya_registradas:
+        raise VentasYaRegistradas(
+            f"Las ventas de este periodo ya están registradas ({ya_registradas} "
+            f"día(s) entre el {fecha_min:%d/%m/%Y} y el {fecha_max:%d/%m/%Y}). "
+            "No se guardó nada. Si el reporte tiene correcciones, contacta al "
+            "administrador del sistema."
+        )
+
+    # --- Rechazo de huecos ---
+    # El reporte debe continuar el historial sin saltarse días.
+    ultimo = ultimo_dia_registrado(db)
+    if ultimo is not None:
+        siguiente = ultimo + timedelta(days=1)
+        if fecha_min != siguiente:
+            raise HuecoEnHistorial(
+                f"El último día registrado es el {_fecha_larga(ultimo)}. Sube el "
+                f"reporte a partir del {_fecha_larga(siguiente)} para no dejar días "
+                "vacíos en el historial. No se guardó nada."
+            )
 
     # --- Arrastre del precio y de la proporción en los días sin ventas ---
     partes = []
@@ -125,34 +215,23 @@ def ingerir_ventas_mensuales(db: Session, contenido: bytes) -> dict:
     filas_omitidas = int(sin_precio.sum())
     df = df[~sin_precio]
 
-    # --- Upsert ---
-    # Se traen de una sola consulta las filas ya existentes del rango, en vez de un
-    # SELECT por fila: cargar el histórico completo son miles de filas.
-    existentes = {
-        (r.fecha, r.producto): r
-        for r in db.query(HistorialVenta)
-        .filter(
-            HistorialVenta.fecha >= fecha_min,
-            HistorialVenta.fecha <= fecha_max,
-            HistorialVenta.producto.in_(PRODUCTOS_SERVIDOS),
-        )
-        .all()
-    }
-
+    # --- Inserción ---
+    # Todas las filas son nuevas: las fechas ya registradas se rechazaron arriba.
     for fila in df.itertuples(index=False):
-        fecha = fila.fecha.date()
-        registro = existentes.get((fecha, fila.producto))
-        if registro is None:
-            registro = HistorialVenta(fecha=fecha, producto=fila.producto)
-            db.add(registro)
-
-        # cantidad negativa: un día cuyas notas de crédito superan las ventas. Se trunca
-        # en 0 porque la tabla representa galones despachados, no el saldo contable.
-        registro.cantidad = max(float(fila.cantidad), 0.0)
-        registro.precio_promedio = float(fila.precio_promedio)
-        registro.n_transacciones_totales = int(fila.n_transacciones_totales)
-        registro.proporcion_transacciones_grandes = float(
-            fila.proporcion_transacciones_grandes
+        db.add(
+            HistorialVenta(
+                fecha=fila.fecha.date(),
+                producto=fila.producto,
+                # cantidad negativa: un día cuyas notas de crédito superan las ventas.
+                # Se trunca en 0 porque la tabla representa galones despachados, no
+                # el saldo contable.
+                cantidad=max(float(fila.cantidad), 0.0),
+                precio_promedio=float(fila.precio_promedio),
+                n_transacciones_totales=int(fila.n_transacciones_totales),
+                proporcion_transacciones_grandes=float(
+                    fila.proporcion_transacciones_grandes
+                ),
+            )
         )
 
     db.commit()
