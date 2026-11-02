@@ -44,7 +44,7 @@ def extraer_excel(contenido_archivo: bytes) -> pd.DataFrame:
     |porque contiene caracteres binarios no decodificables en UTF-8 estándar.                   |
     ---------------------------------------------------------------------------------------------
     """
-    df = pd.read_excel(io.BytesIO(contenido_archivo))
+    df = pd.read_excel(io.BytesIO(contenido_archivo), engine="calamine")
     """
     io.BytesIO -> Crea un "archivo virtual" en memoria RAM.
         Envuelve los bytes y los hace comportarse exactamente como si hubiera hecho: df = pd.read_excel(archivo.xlsx)
