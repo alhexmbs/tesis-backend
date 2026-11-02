@@ -2,9 +2,11 @@ import logging
 from contextlib import asynccontextmanager
 
 import gradio as gr
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.routing import Mount
 from sqlalchemy import text
 
 from app.core.config import settings
@@ -107,6 +109,26 @@ app = gr.mount_gradio_app(
     theme=TEMA,
     head=HEAD_ICONOS,
 )
+
+# Sin sesión, Gradio mostraría en /inicio su propio formulario de login genérico (sin
+# el diseño de /login). En su lugar, se redirige a /login. Se mira la misma cookie
+# que usa Gradio: access-token-<cookie_id>, cuyo token debe seguir vivo en
+# gradio_app.tokens (al cerrar sesión Gradio lo borra).
+if not settings.ui_sin_login:
+    _inicio_gradio = next(
+        r.app for r in app.routes if isinstance(r, Mount) and r.path == "/inicio"
+    )
+
+    @app.middleware("http")
+    async def redirigir_inicio_sin_sesion(request: Request, call_next):
+        if request.method == "GET" and request.url.path in ("/inicio", "/inicio/"):
+            cid = _inicio_gradio.cookie_id
+            token = request.cookies.get(f"access-token-{cid}") or request.cookies.get(
+                f"access-token-unsecure-{cid}"
+            )
+            if _inicio_gradio.tokens.get(token) is None:
+                return RedirectResponse("/login/", status_code=302)
+        return await call_next(request)
 
 
 @app.get("/")
