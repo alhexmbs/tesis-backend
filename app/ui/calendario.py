@@ -40,13 +40,20 @@ CALENDARIO_TEMPLATE = """
 """
 
 
-def calendario(etiqueta: str) -> gr.HTML:
-    """Campo de fecha vacío; `limites_fecha` (inicio.py) lo llena al abrir."""
+def calendario(
+    etiqueta: str,
+    valor: str | None = None,
+    minimo: str | None = None,
+    maximo: str | None = None,
+) -> gr.HTML:
+    """Campo de fecha. Sin valor ni límites sale vacío y `limites_fecha` (inicio.py)
+    lo llena al abrir; con límites fijos (fechas "AAAA-MM-DD") solo deja elegir
+    días entre `minimo` y `maximo`."""
     return gr.HTML(
-        value=None,
+        value=valor,
         html_template=CALENDARIO_TEMPLATE.replace("ETIQUETA", etiqueta),
         js_on_load=CALENDARIO_JS,
         head=CALENDARIO_HEAD,
-        minimo=None,
-        maximo=None,
+        minimo=minimo,
+        maximo=maximo,
     )

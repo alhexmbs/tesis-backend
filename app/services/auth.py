@@ -199,3 +199,12 @@ def restablecer_password_service(user: Usuario, nueva_password, db: Session):
     user.reset_token_hash = None
     user.reset_token_expira = None
     cambiar_password_service(user, nueva_password, db)
+
+
+def registrar_accion(username: str, texto: str, db: Session) -> None:
+    """Guarda en ``usuarios.accion`` lo último que hizo el usuario (sobrescribe)."""
+    user = db.scalar(select(Usuario).where(Usuario.username == username))
+    if user is None:
+        return
+    user.accion = texto
+    db.commit()

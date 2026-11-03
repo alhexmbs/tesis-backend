@@ -40,6 +40,8 @@ with engine.begin() as conexion:
         "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS email VARCHAR NULL",
         "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS reset_token_hash VARCHAR NULL",
         "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS reset_token_expira TIMESTAMP NULL",
+        # Última acción del usuario (p. ej. qué rango de ventas cargó). NULL al inicio.
+        "ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS accion VARCHAR NULL",
         # Único, pero varios usuarios pueden seguir sin correo (NULL no se repite).
         "CREATE UNIQUE INDEX IF NOT EXISTS ix_usuarios_email ON usuarios (email)",
     ):

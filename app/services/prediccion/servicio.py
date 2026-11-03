@@ -166,7 +166,7 @@ def _predecir(art: Artefactos, producto: str, features: dict, base_28: float) ->
 # días sin cargar entre el final del historial y la fecha pedida. Esos días se
 # estiman con el propio modelo, pero solo hasta este horizonte: más allá la
 # proyección deja de ser un apoyo útil para decidir la compra de combustible.
-MAX_HORIZONTE_DIAS = 37  # TEMPORAL para pruebas: el valor real es 15
+MAX_HORIZONTE_DIAS = 15
 
 NOTA_ESTIMACION = (
     "Le recomendamos mantener actualizado el registro de ventas para obtener una "
@@ -545,15 +545,15 @@ def metricas_modelo() -> dict:
     }
 
 def verificacion_ultimo_mes(producto: str, desde: date, hasta: date) -> pd.DataFrame:
-    """Real vs. predicho de septiembre 2026, del notebook de verificación
-    (modelo entrenado hasta el 31/08, septiembre predicho en cadena sin ver ventas reales)."""
+    """Real vs. predicho de octubre 2026, del notebook de verificación
+    (modelo entrenado hasta el 30/09, octubre predicho en cadena sin ver ventas reales)."""
     t = pd.read_csv(VERIFICACION_PATH, parse_dates=["fecha"])
     t = t[(t["producto"] == producto)
           & (t["fecha"].dt.date >= desde) & (t["fecha"].dt.date <= hasta)]
     return t.sort_values("fecha")
 
 def margen_error_galones(producto: str) -> float:
-    """Margen ± en galones por día, sacado de la prueba de septiembre.
+    """Margen ± en galones por día, sacado de la prueba de octubre.
 
     Es el percentil 90 de |real − predicho|: en 27 de los 30 días de la prueba el
     error fue menor que este número. Se da en galones y no en %, porque el % exagera

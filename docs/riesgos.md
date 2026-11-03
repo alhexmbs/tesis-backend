@@ -128,7 +128,7 @@ El **riesgo residual** es el nivel que queda después de los controles ya implem
 
 **R14 — Error de predicción mayor al esperado**
 - *Escenario:* la venta real se aleja de la estimada y se pide de menos o de más.
-- *Controles:* el error se midió con una prueba fuera de muestra (septiembre 2026, modelo entrenado hasta agosto). El margen de error por día se muestra en galones (percentil 90): GLP ±204, REGULAR ±135, PREMIUM ±119 gal. El plan mantiene una reserva mínima del 15 % del tanque. En la prueba el modelo tendió a sobrestimar (lado seguro).
+- *Controles:* el error se midió con una prueba fuera de muestra (1 al 30 de octubre 2026, modelo entrenado hasta septiembre; el 31/10 se excluyó porque el reporte venía incompleto). El margen de error por día se muestra en galones (percentil 90): GLP ±397, REGULAR ±135, PREMIUM ±105 gal. El plan mantiene una reserva mínima del 15 % del tanque. En la prueba el total del mes casi no se desvió: GLP −1 %, REGULAR 0 %, PREMIUM +7 % (sobrestima, lado seguro).
 - *Residual / acción:* medio. La prueba cubre un solo mes; ampliarla a medida que haya más datos.
 
 **R15 — Ventas desactualizadas (reporte atrasado)**

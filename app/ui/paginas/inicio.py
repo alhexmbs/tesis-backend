@@ -6,6 +6,7 @@ import gradio as gr
 import pandas as pd
 
 from app.database import SessionLocal
+from app.services.auth import registrar_accion
 from app.services.entregas import (
     DIAS_SEMANA,
     PlanImposible,
@@ -48,6 +49,11 @@ from app.ui.componentes import (
 from app.utils.validaciones import ErrorValidacion, validar_fecha
 
 PRODUCTOS = ["REGULAR", "PREMIUM", "GLP"]
+
+# Mes de la prueba "Real vs. predicho" (verificacion_octubre.csv). Los calendarios de
+# esa sección solo dejan elegir días dentro de este rango.
+VERIF_DESDE = date(2026, 10, 1)
+VERIF_HASTA = date(2026, 10, 30)
 
 ENCABEZADO_JS_ON_LOAD = leer_js("encabezado.js")
 
@@ -498,7 +504,7 @@ def predecir_rango_ui(
     total = float(tabla["galones"].sum())
     stock = galones_validos(stock)
 
-    # Margen ± en galones por día (prueba de septiembre). Mínimo y máximo de cada día;
+    # Margen ± en galones por día (prueba de octubre). Mínimo y máximo de cada día;
     # el mínimo no baja de 0 porque no existen ventas negativas.
     margen = margen_error_galones(r["producto"])
     tabla["mínimo"] = (tabla["galones"] - margen).clip(lower=0)
@@ -507,9 +513,10 @@ def predecir_rango_ui(
 
     # Sin capacidad: un solo pedido (venta − stock). Con capacidad: plan de entregas
     # día por día, porque puede que todo lo necesario no quepa de una vez.
-    # El plan usa la venta ESTIMADA, sin sumarle el margen: el modelo ya tiende a
-    # sobrestimar y la reserva mínima del tanque (entregas.py) cubre los días en que
-    # se vende más. Sumar además el margen inflaría los pedidos.
+    # El plan usa la venta ESTIMADA, sin sumarle el margen: en la prueba de octubre
+    # el total del mes casi no se desvió (GLP −1 %, REGULAR 0 %, PREMIUM +7 %) y la
+    # reserva mínima del tanque (entregas.py) cubre los días en que se vende más.
+    # Sumar además el margen inflaría los pedidos.
     plan = None
     error_plan = ""
     ahora = datetime.now()
@@ -655,15 +662,19 @@ def info_carga_md() -> str:
         ultimo = None
     texto = fecha_larga(ultimo) if ultimo else "todavía no hay ventas cargadas"
     return (
-        "Sube el **reporte mensual de ventas** (`.xlsx`) que exporta el sistema "
+        "Sube el **reporte de ventas** (`.xlsx`) que exporta el sistema "
         "del grifo.  \n"
         f"Último día registrado: **{texto}**\n\n"
-        "Puedes subir varios meses a la vez."
+        "Puedes subir un día, un mes o varios meses a la vez."
     )
 
 
-def cargar_xlsx_ui(archivos, progress=gr.Progress()):
-    """Carga uno o varios reportes mensuales .xlsx en el historial del modelo."""
+def cargar_xlsx_ui(archivos, request: gr.Request, progress=gr.Progress()):
+    """Carga uno o varios reportes mensuales .xlsx en el historial del modelo.
+
+    Gradio pasa ``request`` solo (por la anotación de tipo); de ahí sale el usuario
+    con sesión iniciada, para dejar en ``usuarios.accion`` qué rango cargó.
+    """
     if not archivos:
         return error_html(
             "No hay archivos seleccionados",
@@ -677,6 +688,7 @@ def cargar_xlsx_ui(archivos, progress=gr.Progress()):
     lineas = []
     total = 0
     con_error = 0
+    rango = []  # fechas inicio/fin de los archivos que sí se guardaron
 
     def _error(nombre, mensaje):
         lineas.append(
@@ -720,6 +732,7 @@ def cargar_xlsx_ui(archivos, progress=gr.Progress()):
                 continue
 
             total += r["filas_guardadas"]
+            rango += [r["fecha_inicio"], r["fecha_fin"]]
             detalle = (
                 f'<li><span class="ico-ok">✓</span> <b>{nombre}</b>: '
                 f"{r['filas_guardadas']} días-producto "
@@ -735,6 +748,19 @@ def cargar_xlsx_ui(archivos, progress=gr.Progress()):
                     f" · {r['filas_omitidas']} omitido(s) por falta de precio previo"
                 )
             lineas.append(detalle + "</li>")
+
+        # Deja registrado quién cargó y qué rango (si hubo sesión y algo se guardó).
+        usuario = getattr(request, "username", None)
+        if rango and usuario:
+            try:
+                registrar_accion(
+                    usuario,
+                    f"Cargó las ventas del {min(rango):%d/%m/%Y} al "
+                    f"{max(rango):%d/%m/%Y} ({datetime.now():%d/%m/%Y %H:%M})",
+                    db,
+                )
+            except Exception:  # noqa: BLE001 - no debe tumbar una carga ya guardada
+                db.rollback()
     finally:
         db.close()
 
@@ -796,9 +822,9 @@ def cargar_metricas_ui():
 
 
 def comparacion_ui(producto: str, desde: str | None, hasta: str | None):
-    """Real vs. predicho de septiembre, filtrado por producto y fechas."""
-    d = date.fromisoformat(desde[:10]) if desde else date(2026, 9, 1)
-    h = date.fromisoformat(hasta[:10]) if hasta else date(2026, 9, 30)
+    """Real vs. predicho de octubre, filtrado por producto y fechas."""
+    d = date.fromisoformat(desde[:10]) if desde else VERIF_DESDE
+    h = date.fromisoformat(hasta[:10]) if hasta else VERIF_HASTA
     t = verificacion_ultimo_mes(producto, d, h)
 
     grafico = t.melt(id_vars="fecha", value_vars=["real", "predicho"],
@@ -926,7 +952,7 @@ with gr.Blocks(title="Inicio") as demo:
             )
 
         # ---------------- Carga del reporte mensual ----------------
-        with gr.Tab("Cargar ventas mensuales", id="carga"):
+        with gr.Tab("Cargar reporte de ventas", id="carga"):
             v_info = gr.Markdown()  # se llena con info_carga_md (al abrir y tras subir)
             v_xlsx = gr.File(
                 label="Reportes de ventas (.xlsx)",
@@ -973,16 +999,18 @@ with gr.Blocks(title="Inicio") as demo:
         # ---------------- Métricas ----------------
         with gr.Tab("Métricas del modelo", id="metricas"):
             gr.Markdown(
-                "### Real vs. predicho (septiembre 2026)\n"
-                "Prueba del método: el modelo se entrenó hasta el 31/08 y predijo "
-                "septiembre sin ver las ventas reales."
+                "### Real vs. predicho (octubre 2026)\n"
+                "Para realizar esta verificación, el modelo se entrenó hasta el 30/09 y predijo "
+                "octubre sin ver las ventas reales."
             )
             with gr.Row(equal_height=True):
-                c_producto = gr.Dropdown(PRODUCTOS, value="REGULAR", label="Producto")
-                c_desde = gr.DateTime(value="2026-09-01", include_time=False,
-                                      type="string", label="Desde")
-                c_hasta = gr.DateTime(value="2026-09-30", include_time=False,
-                                      type="string", label="Hasta")
+                c_producto = gr.Dropdown(PRODUCTOS, value="REGULAR", label="Combustible")
+                # Mismo calendario que Predicción; solo deja elegir días de octubre
+                # (los que tiene verificacion_octubre.csv).
+                c_desde = calendario("Desde", VERIF_DESDE.isoformat(),
+                                     VERIF_DESDE.isoformat(), VERIF_HASTA.isoformat())
+                c_hasta = calendario("Hasta", VERIF_HASTA.isoformat(),
+                                     VERIF_DESDE.isoformat(), VERIF_HASTA.isoformat())
             
             c_grafico = gr.LinePlot(x="fecha", y="galones", color="serie",
                                     label="Real vs. predicho (galones/día)")
@@ -993,7 +1021,7 @@ with gr.Blocks(title="Inicio") as demo:
                 comp.change(comparacion_ui, inputs=[c_producto, c_desde, c_hasta],
                             outputs=[c_grafico, c_tabla])
 
-            m_tabla = gr.Dataframe(label="Detalle por producto")
+            m_tabla = gr.Dataframe(label="Detalle por combustible")
             m_boton = gr.Button("Actualizar métricas")
             m_boton.click(cargar_metricas_ui, outputs=m_tabla)
 

@@ -31,3 +31,8 @@ class Usuario(Base):
     # (nunca el enlace en sí) y hasta cuándo vale, en hora UTC. Se borran al usarlo.
     reset_token_hash = Column(String, nullable=True)
     reset_token_expira = Column(DateTime, nullable=True)
+
+    # Última acción relevante del usuario, en texto llano (p. ej. "Cargó las ventas del
+    # 01/10/2026 al 30/10/2026 (02/11/2026 10:15)"). NULL = todavía no hizo ninguna.
+    # Se sobrescribe en cada carga de ventas desde la UI.
+    accion = Column(String, nullable=True)

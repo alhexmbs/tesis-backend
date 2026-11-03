@@ -13,7 +13,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 ARTEFACTOS_DIR = Path(__file__).resolve().parent.parent / "artefactos"
 
 MODELOS_DIR = ARTEFACTOS_DIR / "modelos"
-VERIFICACION_PATH = ARTEFACTOS_DIR / "verificacion_septiembre.csv"
+VERIFICACION_PATH = ARTEFACTOS_DIR / "verificacion_octubre.csv"
 CONFIG_SERVICIO_PATH = ARTEFACTOS_DIR / "config_servicio.json"
 
 # configuración de las variables de entorno de la base de datos
